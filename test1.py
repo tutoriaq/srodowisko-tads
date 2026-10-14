@@ -4,6 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+
 def wersja_polecenia(polecenie):
     """Zwraca pierwszy wiersz wyniku polecenia albo None, gdy brak programu."""
     if shutil.which(polecenie[0]) is None:
