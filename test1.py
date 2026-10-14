@@ -36,7 +36,7 @@ def main():
         print(f"[{znacznik}] {opis:34s} {wartosc}")
         zgodne += 1 if ok else 0
     print("-" * 66)
-    print(f"Sprawdzenia zakonczone powodzeniem: {zgodne}/{len(sprawdzenia)}")
+    print(f"Sprawdzenia srodowiska: {zgodne}/{len(sprawdzenia)}")
     return 0 if zgodne == len(sprawdzenia) else 1
 
 if __name__ == "__main__":
