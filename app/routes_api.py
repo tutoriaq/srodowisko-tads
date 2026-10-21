@@ -5,7 +5,7 @@ api_bp = Blueprint("api", __name__)
 
 
 @api_bp.get("/kpi")
-def kpi_json():
+def kpi():  # <--- Zmień z kpi_json na kpi
     path = current_app.config["SCIEZKA_DANYCH"]
     region = request.args.get("region")
     regiony = dostepne_regiony(path)

@@ -10,7 +10,7 @@ def index():
 
 
 @panel_bp.get("/kpi")
-def kpi_html():
+def kpi():
     path = current_app.config["SCIEZKA_DANYCH"]
     region = request.args.get("region")
     regiony = dostepne_regiony(path)
