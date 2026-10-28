@@ -1,23 +1,20 @@
-"""Weryfikacja rezultatów ćwiczeń 2 (Podstawy Flask).
+"""Weryfikacja rezultatów ćwiczeń 3 (Routing i obsługa żądań HTTP).
 
-Plik należy umieścić w katalogu projektu srodowisko-tads (obok katalogu app/ lub
-pliku app.py) i uruchamiać przy aktywnym środowisku wirtualnym:
+Plik należy umieścić w katalogu projektu srodowisko-tads (obok katalogu app/)
+i uruchamiać przy aktywnym środowisku wirtualnym:
 
-    python weryfikacja.py
+    python weryfikacja_cw3.py
 
-Skrypt nie zmienia żadnych plików. Sprawdza stan projektu oraz zachowanie aplikacji:
-żądania wysyłane są bezpośrednio do obiektu aplikacji (test_client), więc serwer nie
-musi być uruchomiony. Można go uruchamiać po każdym zadaniu — liczba sprawdzeń
-zgodnych powinna rosnąć. Nazwy w raporcie zapisano bez znaków diakrytycznych,
-aby były czytelne w każdej konsoli.
+Skrypt nie zmienia żadnych plików. Sprawdza zachowanie aplikacji: żądania wysyłane
+są bezpośrednio do obiektu aplikacji (test_client), więc serwer nie musi być
+uruchomiony; zapisane w trakcie sprawdzania raporty istnieją tylko w pamięci procesu
+skryptu. Można go uruchamiać po każdym zadaniu — liczba sprawdzeń zgodnych powinna
+rosnąć. Nazwy w raporcie zapisano bez znaków diakrytycznych, aby były czytelne
+w każdej konsoli.
 """
 
-import csv
 import importlib
 import importlib.util
-import logging
-import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -32,6 +29,7 @@ try:  # odpowiednik wczytywania pliku .env przez polecenie flask
     load_dotenv(KORZEN / ".env")
 except ImportError:
     pass
+
 
 class Brak(Exception):
     """Brak elementu wymaganego przez sprawdzenie; komunikat trafia do raportu."""
@@ -53,66 +51,18 @@ def sprawdzenie(zadanie, opis):
 
 # ---------------------------------------------------------------- narzędzia
 
-def czytaj(sciezka):
-    plik = KORZEN / sciezka
-    return plik.read_text(encoding="utf-8") if plik.is_file() else ""
-
-
-def polecenie_git(*argumenty):
-    try:
-        wynik = subprocess.run(
-            ["git", *argumenty], capture_output=True, text=True, cwd=KORZEN
-        )
-    except OSError:
-        return None
-    return wynik.stdout.strip() if wynik.returncode == 0 else None
-
-
 def zaladuj_aplikacje():
     """Zwraca (aplikacja, opis układu) albo (None, powód niepowodzenia)."""
     try:
         modul = importlib.import_module("app")
     except Exception as blad:  # noqa: BLE001 — raport ma wskazać każdą przyczynę
         return None, f"import app: {type(blad).__name__}: {blad}"
-    if hasattr(modul, "create_app"):
-        try:
-            return modul.create_app(), "pakiet app z funkcja create_app"
-        except Exception as blad:  # noqa: BLE001
-            return None, f"create_app(): {type(blad).__name__}: {blad}"
-    obiekt = getattr(modul, "app", None)
-    if obiekt is not None and hasattr(obiekt, "test_client"):
-        return obiekt, "modul app.py z obiektem app"
-    return None, "modul app nie zawiera obiektu app ani funkcji create_app"
-
-
-def sciezka_danych():
-    aplikacja = STAN["aplikacja"]
-    if aplikacja is not None and aplikacja.config.get("SCIEZKA_DANYCH"):
-        return str(aplikacja.config["SCIEZKA_DANYCH"])
-    return str(KORZEN / "dane" / "zamowienia.csv")
-
-
-def modul_uslug():
-    """Odnajduje moduł warstwy usług: app.services albo services w katalogu głównym."""
-    for nazwa in ("app.services", "services"):
-        if importlib.util.find_spec(nazwa.split(".")[0]) is None:
-            continue
-        try:
-            return importlib.import_module(nazwa)
-        except ModuleNotFoundError:
-            continue
-    raise Brak("brak pliku services.py (ani app/services.py)")
-
-
-def fabryka():
-    modul = importlib.import_module("app")
     if not hasattr(modul, "create_app"):
-        raise Brak("brak funkcji create_app w pakiecie app")
-    return modul.create_app
-
-
-def zadanie(adres, **opcje):
-    return STAN["klient"].get(adres, **opcje)
+        return None, "pakiet app nie zawiera funkcji create_app"
+    try:
+        return modul.create_app(), "pakiet app z funkcja create_app"
+    except Exception as blad:  # noqa: BLE001
+        return None, f"create_app(): {type(blad).__name__}: {blad}"
 
 
 def wymagana_aplikacja():
@@ -120,270 +70,226 @@ def wymagana_aplikacja():
         raise Brak(f"aplikacja niedostepna: {STAN['uklad']}")
 
 
+def zadanie(adres, metoda="GET", **opcje):
+    wymagana_aplikacja()
+    return getattr(STAN["klient"], metoda.lower())(adres, **opcje)
+
+
+def kody(*zadania):
+    return tuple(z.status_code for z in zadania)
+
+
+def plik_istnieje(sciezka):
+    if not (KORZEN / sciezka).is_file():
+        raise Brak(f"brak pliku {sciezka}")
+
+
 # ------------------------------------------------------------------ zadanie 1
 
-@sprawdzenie(1, "Flask dostepny w srodowisku")
+@sprawdzenie(1, "Adresy z cwiczen 2 dzialaja: /, /kpi, /api/kpi")
 def _():
-    spec = importlib.util.find_spec("flask")
-    if spec is None:
-        return False, "brak pakietu flask"
-    from importlib import metadata
-
-    return True, metadata.version("flask")
+    wyniki = kody(zadanie("/"), zadanie("/kpi?region=PL"), zadanie("/api/kpi?region=PL"))
+    return wyniki == (200, 200, 200), wyniki
 
 
-@sprawdzenie(1, "requirements.txt zawiera Flask i python-dotenv")
+@sprawdzenie(1, "services: zapisz_raport i raporty_roku")
 def _():
-    tresc = czytaj("requirements.txt").lower()
-    zgodne = "flask" in tresc and "python-dotenv" in tresc
-    return zgodne, "ok" if zgodne else "brak pozycji w pliku"
+    plik_istnieje("app/services.py")
+    uslugi = importlib.import_module("app.services")
+    uslugi.zapisz_raport(2029, "PL")
+    raporty = uslugi.raporty_roku(2029)
+    return raporty == [{"rok": 2029, "region": "PL"}], raporty
 
 
-@sprawdzenie(1, "Plik .gitignore wyklucza .env")
+@sprawdzenie(1, "Konwerter region zarejestrowany w mapie adresow")
 def _():
-    wpisy = [w.strip() for w in czytaj(".gitignore").splitlines()]
-    zgodne = ".env" in wpisy
-    return zgodne, ".gitignore" if zgodne else "brak wpisu .env"
+    plik_istnieje("app/converters.py")
+    wymagana_aplikacja()
+    zarejestrowany = "region" in STAN["aplikacja"].url_map.converters
+    return zarejestrowany, "tak" if zarejestrowany else "brak konwertera region"
 
 
-@sprawdzenie(1, "Aplikacja Flask daje sie zaladowac")
+@sprawdzenie(1, "Konwerter: match dopasowuje /regiony/XX, odrzuca /regiony/pl")
 def _():
-    return STAN["aplikacja"] is not None, STAN["uklad"]
+    from werkzeug.exceptions import NotFound
+
+    wymagana_aplikacja()
+    dopasowanie = STAN["aplikacja"].url_map.bind("localhost")
+    try:
+        endpoint = dopasowanie.match("/regiony/XX", "GET")[0]
+    except NotFound:
+        endpoint = "brak dopasowania"
+    try:
+        dopasowanie.match("/regiony/pl", "GET")
+        malymi = "dopasowano"
+    except NotFound:
+        malymi = "odrzucono"
+    return (endpoint, malymi) == ("panel.region", "odrzucono"), (endpoint, malymi)
 
 
-@sprawdzenie(1, "Adres / zwraca kod 200")
+@sprawdzenie(1, "Panel regionu: PL 200; pl, POL, XX daja 404")
+def _():
+    wyniki = kody(zadanie("/regiony/PL"), zadanie("/regiony/pl"), zadanie("/regiony/POL"), zadanie("/regiony/XX"))
+    return wyniki == (200, 404, 404, 404), wyniki
+
+
+@sprawdzenie(1, "Raport: /raporty/ i /raporty/2027 daja 200")
+def _():
+    wyniki = kody(zadanie("/raporty/"), zadanie("/raporty/2027"))
+    return wyniki == (200, 200), wyniki
+
+
+@sprawdzenie(1, "Zakres roku w adresie: 2031, 2019 i abc daja 404")
+def _():
+    wyniki = kody(zadanie("/raporty/2027"), zadanie("/raporty/2031"), zadanie("/raporty/2019"), zadanie("/raporty/abc"))
+    return wyniki == (200, 404, 404, 404), wyniki
+
+
+@sprawdzenie(1, "Adres /raporty/2026 przekierowuje (308) na /raporty/")
+def _():
+    odp = zadanie("/raporty/2026")
+    lokalizacja = (odp.headers.get("Location") or "").replace("http://localhost", "")
+    return (odp.status_code, lokalizacja) == (308, "/raporty/"), (odp.status_code, lokalizacja)
+
+
+@sprawdzenie(1, "Dwie reguly dla jednego punktu koncowego panel.raport")
 def _():
     wymagana_aplikacja()
-    kod = zadanie("/").status_code
-    return kod == 200, kod
-
-
-@sprawdzenie(1, "Adres / zwraca tekst Panel wskaznikow")
-def _():
-    wymagana_aplikacja()
-    tresc = zadanie("/").get_data(as_text=True)
-    return "Panel wskaźników" in tresc, tresc[:40]
+    reguly = [str(r) for r in STAN["aplikacja"].url_map.iter_rules() if r.endpoint == "panel.raport"]
+    return len(reguly) == 2, sorted(reguly)
 
 
 # ------------------------------------------------------------------ zadanie 2
 
-@sprawdzenie(2, "Zbior dane/zamowienia.csv zgodny z trescia cwiczen")
+@sprawdzenie(2, "Adres /raporty/nowy: GET 200, DELETE 405")
 def _():
-    sciezka = KORZEN / "dane" / "zamowienia.csv"
-    if not sciezka.is_file():
-        return False, "brak pliku dane/zamowienia.csv"
-    with open(sciezka, encoding="utf-8", newline="") as plik:
-        wiersze = list(csv.DictReader(plik))
-    przychod = round(sum(float(w["przychod"]) for w in wiersze), 2)
-    koszt = round(sum(float(w["koszt"]) for w in wiersze), 2)
-    regiony = sorted({w["region"] for w in wiersze})
-    zgodne = (len(wiersze), przychod, koszt, regiony) == (8, 108850.0, 82100.0, ["CZ", "DE", "PL"])
-    return zgodne, f"{len(wiersze)} wierszy, przychod {przychod}, koszt {koszt}"
+    wyniki = kody(zadanie("/raporty/nowy"), zadanie("/raporty/nowy", "DELETE"))
+    return wyniki == (200, 405), wyniki
 
 
-@sprawdzenie(2, "Modul services nie importuje biblioteki Flask")
+@sprawdzenie(2, "Zapis POST rok=2027, region=PL: 303 i Location /raporty/2027")
 def _():
-    modul = modul_uslug()
-    zrodlo = Path(modul.__file__).read_text(encoding="utf-8")
-    zawiera = re.search(r"^\s*(from|import)\s+flask", zrodlo, re.MULTILINE)
-    return zawiera is None, modul.__name__
+    odp = zadanie("/raporty/nowy", "POST", data={"rok": "2027", "region": "PL"})
+    lokalizacja = (odp.headers.get("Location") or "").replace("http://localhost", "")
+    return (odp.status_code, lokalizacja) == (303, "/raporty/2027"), (odp.status_code, lokalizacja)
 
 
-@sprawdzenie(2, "dostepne_regiony zwraca CZ, DE, PL")
+@sprawdzenie(2, "Raport 2027 po zapisie: Zapisane raporty: 1")
 def _():
-    wynik = modul_uslug().dostepne_regiony(sciezka_danych())
-    return list(wynik) == ["CZ", "DE", "PL"], list(wynik)
+    tresc = zadanie("/raporty/2027").get_data(as_text=True)
+    return "Zapisane raporty: 1" in tresc, tresc[:46]
 
 
-@sprawdzenie(2, "policz_wskazniki dla regionu PL")
+@sprawdzenie(2, "Zapis za rok domyslny: Location /raporty/ (adres kanoniczny)")
 def _():
-    w = modul_uslug().policz_wskazniki(sciezka_danych(), "PL")
-    oczekiwane = (3, 37900.0, 27900.0, 0.2639)
-    otrzymane = (w["liczba_zamowien"], w["przychod"], w["koszt"], w["marza"])
-    return otrzymane == oczekiwane, otrzymane
+    odp = zadanie("/raporty/nowy", "POST", data={"rok": "2026", "region": "DE"})
+    lokalizacja = (odp.headers.get("Location") or "").replace("http://localhost", "")
+    return (odp.status_code, lokalizacja) == (303, "/raporty/"), (odp.status_code, lokalizacja)
 
 
-@sprawdzenie(2, "policz_wskazniki dla calego zbioru")
+@sprawdzenie(2, "Dane niepoprawne: rok=abc i nieznany region daja 400")
 def _():
-    w = modul_uslug().policz_wskazniki(sciezka_danych())
-    oczekiwane = (8, 108850.0, 82100.0, 0.2458)
-    otrzymane = (w["liczba_zamowien"], w["przychod"], w["koszt"], w["marza"])
-    return otrzymane == oczekiwane, otrzymane
+    wyniki = kody(
+        zadanie("/raporty/nowy", "POST", data={"rok": "abc", "region": "PL"}),
+        zadanie("/raporty/nowy", "POST", data={"rok": "2027", "region": "XX"}),
+    )
+    return wyniki == (400, 400), wyniki
 
 
-@sprawdzenie(2, "Region bez zamowien: marza 0.0 bez wyjatku")
+@sprawdzenie(2, "Rok poza zakresem (2045) daje 422")
 def _():
-    w = modul_uslug().policz_wskazniki(sciezka_danych(), "XX")
-    return w["marza"] == 0.0, w["marza"]
+    kod = zadanie("/raporty/nowy", "POST", data={"rok": "2045", "region": "PL"}).status_code
+    return kod == 422, kod
 
 
-@sprawdzenie(2, "Adres /kpi zwraca tekst HTML z kodem 200")
+@sprawdzenie(2, "Adres wycofany /stary-panel: 301 i Location /kpi")
 def _():
-    wymagana_aplikacja()
-    odp = zadanie("/kpi")
-    zgodne = odp.status_code == 200 and odp.mimetype == "text/html"
-    return zgodne, f"{odp.status_code} {odp.mimetype}"
+    odp = zadanie("/stary-panel")
+    lokalizacja = (odp.headers.get("Location") or "").replace("http://localhost", "")
+    return (odp.status_code, lokalizacja) == (301, "/kpi"), (odp.status_code, lokalizacja)
 
 
-@sprawdzenie(2, "Adres /kpi?region=PL zawiera region i marze")
+@sprawdzenie(2, "validators.py: funkcja parametr_int")
 def _():
-    wymagana_aplikacja()
-    tresc = zadanie("/kpi?region=PL").get_data(as_text=True)
-    zgodne = "PL" in tresc and ("26.39" in tresc or "0.2639" in tresc)
-    return zgodne, tresc[:60]
+    plik_istnieje("app/validators.py")
+    modul = importlib.import_module("app.validators")
+    return callable(getattr(modul, "parametr_int", None)), "parametr_int"
 
 
-@sprawdzenie(2, "Adres /api/kpi?region=PL zwraca poprawny JSON")
+@sprawdzenie(2, "API: brak roku 400, abc 400, 2040 422, 2027 200")
 def _():
-    wymagana_aplikacja()
-    odp = zadanie("/api/kpi?region=PL")
-    if odp.mimetype != "application/json":
-        return False, f"{odp.status_code} {odp.mimetype}"
-    dane = odp.get_json()
-    zgodne = odp.status_code == 200 and dane.get("marza") == 0.2639 and dane.get("liczba_zamowien") == 3
-    return zgodne, dane
-
-
-@sprawdzenie(2, "API: region PL daje 200, nieznany region XX daje 404")
-def _():
-    wymagana_aplikacja()
-    kody = (zadanie("/api/kpi?region=PL").status_code, zadanie("/api/kpi?region=XX").status_code)
-    return kody == (200, 404), kody
-
-
-@sprawdzenie(2, "Panel: region PL daje 200, nieznany region XX daje 404")
-def _():
-    wymagana_aplikacja()
-    kody = (zadanie("/kpi?region=PL").status_code, zadanie("/kpi?region=XX").status_code)
-    return kody == (200, 404), kody
-
-
-@sprawdzenie(2, "Odpowiedz 404 zawiera opis przyczyny z kodem regionu")
-def _():
-    wymagana_aplikacja()
-    odp = zadanie("/kpi?region=XX")
-    tresc = odp.get_data(as_text=True)
-    return odp.status_code == 404 and "XX" in tresc, "opis w tresci" if "XX" in tresc else "brak opisu w tresci"
+    wyniki = kody(
+        zadanie("/api/raporty"),
+        zadanie("/api/raporty?rok=abc"),
+        zadanie("/api/raporty?rok=2040"),
+        zadanie("/api/raporty?rok=2027"),
+    )
+    return wyniki == (400, 400, 422, 200), wyniki
 
 
 # ------------------------------------------------------------------ zadanie 3
 
-@sprawdzenie(3, "Pakiet app z funkcja create_app (bez pliku app.py)")
+@sprawdzenie(3, "Naglowek X-Czas-Ms w odpowiedziach 200 i 404")
 def _():
-    pakiet = (KORZEN / "app" / "__init__.py").is_file()
-    modul = (KORZEN / "app.py").is_file()
-    return pakiet and not modul, ("pakiet app/" if pakiet else "brak pakietu") + (", istnieje app.py" if modul else "")
+    odp_ok, odp_404 = zadanie("/"), zadanie("/nie-ma-takiego-adresu")
+    zgodne = "X-Czas-Ms" in odp_ok.headers and "X-Czas-Ms" in odp_404.headers and odp_404.status_code == 404
+    return zgodne, (odp_ok.headers.get("X-Czas-Ms"), odp_404.headers.get("X-Czas-Ms"))
 
 
-@sprawdzenie(3, "Pliki pakietu: config, services, routes_panel, routes_api")
+@sprawdzenie(3, "decorators.py: wymagany_parametr zachowuje nazwe widoku")
 def _():
-    brakujace = [n for n in ("config", "services", "routes_panel", "routes_api") if not (KORZEN / "app" / f"{n}.py").is_file()]
-    return not brakujace, "komplet" if not brakujace else "brak: " + ", ".join(brakujace)
+    plik_istnieje("app/decorators.py")
+    wymagana_aplikacja()
+    widok = STAN["aplikacja"].view_functions.get("api.raporty")
+    if widok is None:
+        raise Brak("brak punktu koncowego api.raporty")
+    return widok.__name__ == "raporty", widok.__name__
 
 
-@sprawdzenie(3, "config.py: Config, RozwojowaConfig, KONFIGURACJE")
+@sprawdzenie(3, "API: brak roku daje 400 i dokument JSON (blad, kod)")
 def _():
-    if not (KORZEN / "app" / "config.py").is_file():
-        raise Brak("brak pliku app/config.py")
-    config = importlib.import_module("app.config")
-    zgodne = (
-        all(hasattr(config.Config, a) for a in ("SECRET_KEY", "SCIEZKA_DANYCH", "DEBUG"))
-        and config.Config.DEBUG is False
-        and config.RozwojowaConfig.DEBUG is True
-        and {"rozwojowa", "produkcyjna"} <= set(config.KONFIGURACJE)
-    )
-    return zgodne, sorted(config.KONFIGURACJE)
+    odp = zadanie("/api/raporty")
+    dane = odp.get_json(silent=True) or {}
+    zgodne = odp.status_code == 400 and dane.get("kod") == 400 and bool(dane.get("blad"))
+    return zgodne, f"{odp.status_code} {odp.mimetype}"
 
 
-@sprawdzenie(3, "create_app('rozwojowa'): DEBUG wlaczony")
+@sprawdzenie(3, "API: rok=2040 daje 422 i dokument JSON z kodem 422")
 def _():
-    wartosc = fabryka()("rozwojowa").config["DEBUG"]
-    return wartosc is True, wartosc
+    odp = zadanie("/api/raporty?rok=2040")
+    dane = odp.get_json(silent=True) or {}
+    return (odp.status_code, dane.get("kod")) == (422, 422), f"{odp.status_code} {odp.mimetype}"
 
 
-@sprawdzenie(3, "create_app('produkcyjna'): DEBUG wylaczony")
+@sprawdzenie(3, "Poza API: blad jako tekst HTML z kodem w <h1>")
 def _():
-    wartosc = fabryka()("produkcyjna").config["DEBUG"]
-    return wartosc is False, wartosc
+    odp = zadanie("/regiony/XX")
+    zgodne = odp.status_code == 404 and odp.mimetype == "text/html" and "<h1>404</h1>" in odp.get_data(as_text=True)
+    return zgodne, f"{odp.status_code} {odp.mimetype}"
 
 
-@sprawdzenie(3, ".env.example wymienia zmienne bez wartosci klucza")
+@sprawdzenie(3, "Odpowiedz HTML nie powtarza wartosci z adresu")
 def _():
-    linie = [l.strip() for l in czytaj(".env.example").splitlines()]
-    zgodne = "SECRET_KEY=" in linie and any(l.startswith("FLASK_DEBUG=") for l in linie)
-    return zgodne, ".env.example" if czytaj(".env.example") else "brak pliku"
+    odp = zadanie("/kpi?region=%3Cb%3EPL%3C%2Fb%3E")
+    tresc = odp.get_data(as_text=True)
+    zgodne = odp.status_code == 404 and "<h1>404</h1>" in tresc and "<b>" not in tresc
+    return zgodne, odp.status_code
 
 
-@sprawdzenie(3, "Plik .env zawiera klucz SECRET_KEY (min. 32 znaki)")
+@sprawdzenie(3, "Przekierowanie 308 zachowane mimo wspolnej procedury bledow")
 def _():
-    for linia in czytaj(".env").splitlines():
-        if linia.startswith("SECRET_KEY="):
-            dlugosc = len(linia.split("=", 1)[1].strip())
-            return dlugosc >= 32, f"dlugosc {dlugosc}"
-    return False, "brak wpisu SECRET_KEY w .env"
+    procedura_dziala = "<h1>404</h1>" in zadanie("/regiony/XX").get_data(as_text=True)
+    odp = zadanie("/raporty/2026")
+    zgodne = procedura_dziala and odp.status_code == 308 and "<h1>308</h1>" not in odp.get_data(as_text=True)
+    return zgodne, odp.status_code if procedura_dziala else "brak wspolnej procedury bledow"
 
 
-@sprawdzenie(3, "Plik .env nie jest sledzony przez Git")
-def _():
-    if not (KORZEN / ".env").is_file():
-        raise Brak("brak pliku .env")
-    sledzone = polecenie_git("ls-files", ".env")
-    if sledzone is None:
-        return False, "brak repozytorium Git"
-    return sledzone == "", "nie sledzony" if sledzone == "" else "sledzony"
-
-
-@sprawdzenie(3, "Aplikacja wczytuje SECRET_KEY ze srodowiska")
+@sprawdzenie(3, "Interfejs pod /api i /api/v2 (blueprinty api i api_v2)")
 def _():
     wymagana_aplikacja()
-    return bool(STAN["aplikacja"].config.get("SECRET_KEY")), "niepusty" if STAN["aplikacja"].config.get("SECRET_KEY") else "pusty"
-
-
-@sprawdzenie(3, "Zarejestrowane blueprinty: api i panel")
-def _():
-    wymagana_aplikacja()
-    nazwy = sorted(STAN["aplikacja"].blueprints)
-    return nazwy == ["api", "panel"], nazwy
-
-
-@sprawdzenie(3, "Adresy: /api/kpi z przedrostkiem, widoki api.kpi i panel.kpi")
-def _():
-    wymagana_aplikacja()
-    aplikacja = STAN["aplikacja"]
-    wzorce = {str(r) for r in aplikacja.url_map.iter_rules()}
-    widoki = set(aplikacja.view_functions)
-    zgodne = "/api/kpi" in wzorce and {"api.kpi", "panel.kpi"} <= widoki
-    return zgodne, sorted(w for w in widoki if w.endswith(".kpi"))
-
-
-@sprawdzenie(3, "Poziom dziennika aplikacji ustawiony na INFO")
-def _():
-    wymagana_aplikacja()
-    poziom = STAN["aplikacja"].logger.level
-    return poziom == logging.INFO, logging.getLevelName(poziom)
-
-
-@sprawdzenie(3, "Widok /kpi zapisuje w dzienniku komunikat INFO z regionem")
-def _():
-    wymagana_aplikacja()
-
-    class Zbieracz(logging.Handler):
-        def __init__(self):
-            super().__init__(level=logging.DEBUG)
-            self.rekordy = []
-
-        def emit(self, rekord):
-            self.rekordy.append(rekord)
-
-    zbieracz = Zbieracz()
-    dziennik = STAN["aplikacja"].logger
-    dziennik.addHandler(zbieracz)
-    try:
-        zadanie("/kpi?region=PL")
-    finally:
-        dziennik.removeHandler(zbieracz)
-    info = [r for r in zbieracz.rekordy if r.levelno == logging.INFO and "PL" in r.getMessage()]
-    return bool(info), info[0].getMessage() if info else "brak komunikatu INFO z regionem PL"
+    nazwy = sorted(n for n in STAN["aplikacja"].blueprints if n.startswith("api"))
+    wyniki = kody(zadanie("/api/raporty?rok=2027"), zadanie("/api/v2/raporty?rok=2027"))
+    return nazwy == ["api", "api_v2"] and wyniki == (200, 200), (nazwy, wyniki)
 
 
 # --------------------------------------------------------------------- raport
@@ -393,7 +299,7 @@ def main():
     if STAN["aplikacja"] is not None:
         STAN["klient"] = STAN["aplikacja"].test_client()
 
-    print("Weryfikacja cwiczen 2")
+    print("Weryfikacja cwiczen 3")
     print(f"Katalog: {KORZEN}")
     print(f"Uklad aplikacji: {STAN['uklad']}")
     razem = {}
@@ -408,8 +314,8 @@ def main():
             zgodne = False
             szczegol = str(blad) if isinstance(blad, Brak) else f"{type(blad).__name__}: {blad}"
         zgodne = bool(zgodne)
-        szczegol = str(szczegol).replace("\n", " ")[:46]
-        print(f"[{'OK  ' if zgodne else 'BLAD'}] Z{numer} {opis:62s} {szczegol}")
+        szczegol = str(szczegol).replace("\n", " ")[:42]
+        print(f"[{'OK  ' if zgodne else 'BLAD'}] Z{numer} {opis:60s} {szczegol}")
         razem.setdefault(numer, []).append(zgodne)
     print("-" * 74)
     for numer in sorted(razem):

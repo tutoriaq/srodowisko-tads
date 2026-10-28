@@ -42,3 +42,11 @@ def policz_wskazniki(sciezka: str, region: str = None) -> dict:
         "koszt": float(koszt),
         "marza": marza,
     }
+
+lista_RAPORTY = []
+
+def zapisz_raport(rok: int, region: str):
+    lista_RAPORTY.append({"rok": rok, "region": region})
+
+def raporty_roku(rok: int) -> list:
+    return [r for r in lista_RAPORTY if r["rok"] == rok]
