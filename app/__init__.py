@@ -1,11 +1,10 @@
-# app/__init__.py
 import logging
 import time
+from datetime import date
 from flask import Flask, g
 from app.config import KONFIGURACJE
 from app.converters import RegionConverter
 from app.errors import zarejestruj_obsluge_bledow
-from datetime import date
 from app.filters import zarejestruj_filtry
 from app.services import dostepne_regiony
 
@@ -29,7 +28,10 @@ def create_app(nazwa_konfiguracji="rozwojowa"):
             elapsed_ms = (time.perf_counter() - g.start_time) * 1000
             response.headers["X-Czas-Ms"] = f"{elapsed_ms:.2f}"
         return response
+
+    # 3. Filtry własne i procesor kontekstu[cite: 5, 6]
     zarejestruj_filtry(app)
+
     @app.context_processor
     def dane_wspolne():
         return {
@@ -37,10 +39,10 @@ def create_app(nazwa_konfiguracji="rozwojowa"):
             "rok_biezacy": date.today().year,
         }
 
-    # 3. Rejestracja błędów
+    # 4. Rejestracja wspólnej obsługi błędów[cite: 7]
     zarejestruj_obsluge_bledow(app)
 
-    # 4. Rejestracja blueprintów (w tym wersjonowanie api_v2)
+    # 5. Rejestracja blueprintów (w tym wersjonowanie api_v2)
     from app.routes_api import api_bp
     from app.routes_panel import panel_bp
 
@@ -49,4 +51,3 @@ def create_app(nazwa_konfiguracji="rozwojowa"):
     app.register_blueprint(api_bp, url_prefix="/api/v2", name="api_v2")
 
     return app
-

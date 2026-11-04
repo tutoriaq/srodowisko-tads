@@ -15,6 +15,8 @@ from app.services import (
     zestawienie_regionow,
 )
 from datetime import date
+from flask import flash
+
 panel_bp = Blueprint("panel", __name__)
 
 ROK_DOMYSLNY = 2026
@@ -89,6 +91,7 @@ def nowy_raport():
         abort(422, description="Rok poza zakresem 2020-2030")
 
     zapisz_raport(rok_raw, region_val)
+    flash(f"Raport za rok {rok_raw} został zapisany", "sukces")
     return redirect(url_for("panel.raport", rok=rok_raw), code=303)
 
 
