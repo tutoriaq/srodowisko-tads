@@ -14,7 +14,7 @@ from app.services import (
     zapisz_raport,
     zestawienie_regionow,
 )
-
+from datetime import date
 panel_bp = Blueprint("panel", __name__)
 
 ROK_DOMYSLNY = 2026
@@ -32,16 +32,17 @@ def kpi():
     regiony = dostepne_regiony(path)
 
     if region and region not in regiony:
-        abort(404, description=f"Nieznany region: {region}")[cite: 7]
+        abort(404, description=f"Nieznany region: {region}")
 
     stats = policz_wskazniki(path, region)
-    zestawienie = zestawienie_regionow(path)[cite: 4]
+    zestawienie = zestawienie_regionow(path)
 
     return render_template(
         "panel.html",
         wskazniki=stats,
-        zestawienie=zestawienie
-    )[cite: 4]
+        zestawienie=zestawienie,
+        dzisiaj=date.today()
+    )
 
 
 @panel_bp.get("/regiony/<kod>")
@@ -50,23 +51,24 @@ def region(kod):
     regiony = dostepne_regiony(path)
 
     if kod not in regiony:
-        abort(404, description=f"Nieznany region: {kod}")[cite: 7]
+        abort(404, description=f"Nieznany region: {kod}")
 
     stats = policz_wskazniki(path, kod)
-    zestawienie = zestawienie_regionow(path)[cite: 4]
+    zestawienie = zestawienie_regionow(path)
 
     return render_template(
         "panel.html",
         wskazniki=stats,
-        zestawienie=zestawienie
-    )[cite: 4]
+        zestawienie=zestawienie,
+        dzisiaj=date.today()
+    )
 
 
 @panel_bp.get("/raporty/", defaults={"rok": ROK_DOMYSLNY})
 @panel_bp.get("/raporty/<int(min=2020, max=2030):rok>")
 def raport(rok):
     raporty = raporty_roku(rok)
-    return render_template("report.html", rok=rok, zapisane=raporty)[cite: 6]
+    return render_template("report.html", rok=rok, zapisane=raporty)
 
 
 @panel_bp.route("/raporty/nowy", methods=["GET", "POST"])

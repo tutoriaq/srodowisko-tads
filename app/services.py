@@ -23,8 +23,9 @@ def dostepne_regiony(sciezka: str) -> list[str]:
 def policz_wskazniki(sciezka: str, region: str = None) -> dict:
     zamowienia = wczytaj_zamowienia(sciezka)
 
-    if region:
-        zamowienia = [z for z in zamowienia if z["region"] == region]
+    # Jeśli region nie został podany, domyślnie wybieramy "PL"
+    region_kod = region if region else "PL"
+    zamowienia = [z for z in zamowienia if z["region"] == region_kod]
 
     liczba_zamowien = len(zamowienia)
     przychod = sum(z["przychod"] for z in zamowienia)
@@ -36,17 +37,26 @@ def policz_wskazniki(sciezka: str, region: str = None) -> dict:
         marza = round((przychod - koszt) / przychod, 4)
 
     return {
-        "region": region,
+        "region": region_kod,
         "liczba_zamowien": liczba_zamowien,
         "przychod": float(przychod),
         "koszt": float(koszt),
         "marza": marza,
     }
 
+
 lista_RAPORTY = []
+
 
 def zapisz_raport(rok: int, region: str):
     lista_RAPORTY.append({"rok": rok, "region": region})
 
+
 def raporty_roku(rok: int) -> list:
     return [r for r in lista_RAPORTY if r["rok"] == rok]
+
+
+def zestawienie_regionow(sciezka):
+    """Zwraca listę słowników/obiektów ze wskaźnikami dla wszystkich regionów posortowanych alfabetycznie."""
+    kody = sorted(dostepne_regiony(sciezka))
+    return [policz_wskazniki(sciezka, kod) for kod in kody]
