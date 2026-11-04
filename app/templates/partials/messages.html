@@ -1,0 +1,4 @@
+{# partials/messages.html #}
+{% for kategoria, tresc in get_flashed_messages(with_categories=true) %}
+    <p class="komunikat {{ kategoria }}">{{ tresc }}</p>
+{% endfor %}

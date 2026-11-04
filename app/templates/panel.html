@@ -1,0 +1,29 @@
+{# panel.html #}
+{% extends "base.html" %}
+{% from "macros.html" import kafelek, ocena %}
+
+{% block tytul %}Wskaźniki: {{ wskazniki.region }}{% endblock %}
+
+{% block tresc %}
+<h1>Wskaźniki: {{ wskazniki.region }}</h1>
+<section class="kafelki">
+    {{ kafelek("Przychód", wskazniki.przychod) }}
+    {{ kafelek("Koszt", wskazniki.koszt) }}
+    {{ kafelek("Marża", wskazniki.marza) }}
+    {{ kafelek("Zamówienia", wskazniki.liczba_zamowien) }}
+</section>
+
+<table>
+    <tr><th>Region</th><th>Przychód</th><th>Marża</th><th>Ocena</th></tr>
+    {% for w in zestawienie %}
+    <tr>
+        <td>{{ w.region }}</td>
+        <td>{{ w.przychod }}</td>
+        <td>{{ w.marza }}</td>
+        <td>{{ ocena(w.marza) }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4">Brak danych</td></tr>
+    {% endfor %}
+</table>
+{% endblock %}

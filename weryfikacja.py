@@ -1,21 +1,21 @@
-"""Weryfikacja rezultatów ćwiczeń 3 (Routing i obsługa żądań HTTP).
+"""Weryfikacja rezultatów ćwiczeń 4 (Szablony HTML i system Jinja2).
 
 Plik należy umieścić w katalogu projektu srodowisko-tads (obok katalogu app/)
 i uruchamiać przy aktywnym środowisku wirtualnym:
 
-    python weryfikacja_cw3.py
+    python verify_ex4.py
 
-Skrypt nie zmienia żadnych plików. Sprawdza zachowanie aplikacji: żądania wysyłane
-są bezpośrednio do obiektu aplikacji (test_client), więc serwer nie musi być
-uruchomiony; zapisane w trakcie sprawdzania raporty istnieją tylko w pamięci procesu
-skryptu. Można go uruchamiać po każdym zadaniu — liczba sprawdzeń zgodnych powinna
-rosnąć. Nazwy w raporcie zapisano bez znaków diakrytycznych, aby były czytelne
-w każdej konsoli.
+Skrypt nie zmienia żadnych plików. Żądania wysyła bezpośrednio do obiektu aplikacji
+(test_client), więc serwer nie musi być uruchomiony; zapisane w trakcie sprawdzania
+raporty istnieją tylko w pamięci procesu skryptu. Można go uruchamiać po każdym
+zadaniu — liczba sprawdzeń zgodnych powinna rosnąć. Nazwy w raporcie zapisano bez
+znaków diakrytycznych, aby były czytelne w każdej konsoli.
 """
 
 import importlib
-import importlib.util
+import re
 import sys
+from datetime import date
 from pathlib import Path
 
 KORZEN = Path(__file__).resolve().parent
@@ -29,6 +29,8 @@ try:  # odpowiednik wczytywania pliku .env przez polecenie flask
     load_dotenv(KORZEN / ".env")
 except ImportError:
     pass
+
+TWARDA = "\u00a0"
 
 
 class Brak(Exception):
@@ -52,7 +54,6 @@ def sprawdzenie(zadanie, opis):
 # ---------------------------------------------------------------- narzędzia
 
 def zaladuj_aplikacje():
-    """Zwraca (aplikacja, opis układu) albo (None, powód niepowodzenia)."""
     try:
         modul = importlib.import_module("app")
     except Exception as blad:  # noqa: BLE001 — raport ma wskazać każdą przyczynę
@@ -75,221 +76,274 @@ def zadanie(adres, metoda="GET", **opcje):
     return getattr(STAN["klient"], metoda.lower())(adres, **opcje)
 
 
-def kody(*zadania):
-    return tuple(z.status_code for z in zadania)
+def tresc(odp):
+    return odp.get_data(as_text=True)
 
 
-def plik_istnieje(sciezka):
-    if not (KORZEN / sciezka).is_file():
-        raise Brak(f"brak pliku {sciezka}")
+def zrodlo(sciezka):
+    plik = KORZEN / "app" / "templates" / sciezka
+    if not plik.is_file():
+        raise Brak(f"brak pliku app/templates/{sciezka}")
+    return plik.read_text(encoding="utf-8")
+
+
+def filtr(nazwa):
+    wymagana_aplikacja()
+    funkcja = STAN["aplikacja"].jinja_env.filters.get(nazwa)
+    if funkcja is None:
+        raise Brak(f"brak filtru {nazwa}")
+    return funkcja
+
+
+def filtr_wlasny(nazwa):
+    """Filtry wbudowane (np. 'length') nie liczą się jako filtry własne."""
+    funkcja = filtr(nazwa)
+    if getattr(funkcja, "__module__", "").startswith("jinja2"):
+        raise Brak(f"filtr {nazwa} nie jest filtrem wlasnym")
+    return funkcja
+
+
+def panel(adres):
+    odp = zadanie(adres)
+    return odp.status_code, tresc(odp)
 
 
 # ------------------------------------------------------------------ zadanie 1
 
-@sprawdzenie(1, "Adresy z cwiczen 2 dzialaja: /, /kpi, /api/kpi")
+@sprawdzenie(1, "Arkusz styles.css serwowany: 200 i text/css")
 def _():
-    wyniki = kody(zadanie("/"), zadanie("/kpi?region=PL"), zadanie("/api/kpi?region=PL"))
-    return wyniki == (200, 200, 200), wyniki
+    odp = zadanie("/static/styles.css")
+    return (odp.status_code, odp.mimetype) == (200, "text/css"), (odp.status_code, odp.mimetype)
 
 
-@sprawdzenie(1, "services: zapisz_raport i raporty_roku")
+@sprawdzenie(1, "Szablony: base, macros, panel, partials/navigation i messages")
 def _():
-    plik_istnieje("app/services.py")
-    uslugi = importlib.import_module("app.services")
-    uslugi.zapisz_raport(2029, "PL")
-    raporty = uslugi.raporty_roku(2029)
-    return raporty == [{"rok": 2029, "region": "PL"}], raporty
+    brakujace = [n for n in ("base.html", "macros.html", "panel.html", "partials/navigation.html", "partials/messages.html")
+                 if not (KORZEN / "app" / "templates" / n).is_file()]
+    return not brakujace, "komplet" if not brakujace else "brak: " + ", ".join(brakujace)
 
 
-@sprawdzenie(1, "Konwerter region zarejestrowany w mapie adresow")
+@sprawdzenie(1, "panel.html dziedziczy po base.html, bez wlasnego naglowka")
 def _():
-    plik_istnieje("app/converters.py")
-    wymagana_aplikacja()
-    zarejestrowany = "region" in STAN["aplikacja"].url_map.converters
-    return zarejestrowany, "tak" if zarejestrowany else "brak konwertera region"
+    kod = zrodlo("panel.html")
+    zgodne = bool(re.search(r"\{%-?\s*extends\s+[\"']base\.html[\"']", kod)) and "<html" not in kod.lower()
+    return zgodne, "extends base.html" if zgodne else "brak extends lub wlasny <html>"
 
 
-@sprawdzenie(1, "Konwerter: match dopasowuje /regiony/XX, odrzuca /regiony/pl")
+@sprawdzenie(1, "Uklad wspolny: arkusz przez url_for, nav, main i footer")
 def _():
-    from werkzeug.exceptions import NotFound
-
-    wymagana_aplikacja()
-    dopasowanie = STAN["aplikacja"].url_map.bind("localhost")
-    try:
-        endpoint = dopasowanie.match("/regiony/XX", "GET")[0]
-    except NotFound:
-        endpoint = "brak dopasowania"
-    try:
-        dopasowanie.match("/regiony/pl", "GET")
-        malymi = "dopasowano"
-    except NotFound:
-        malymi = "odrzucono"
-    return (endpoint, malymi) == ("panel.region", "odrzucono"), (endpoint, malymi)
+    status, html = panel("/kpi?region=PL")
+    elementy = ['href="/static/styles.css"', "<nav>", "<main>", "<footer>"]
+    brakujace = [e for e in elementy if e not in html]
+    return status == 200 and not brakujace, status if not brakujace else "brak: " + ", ".join(brakujace)
 
 
-@sprawdzenie(1, "Panel regionu: PL 200; pl, POL, XX daja 404")
+@sprawdzenie(1, "Tytul z bloku: <title>Wskazniki: PL · TADS</title>")
 def _():
-    wyniki = kody(zadanie("/regiony/PL"), zadanie("/regiony/pl"), zadanie("/regiony/POL"), zadanie("/regiony/XX"))
-    return wyniki == (200, 404, 404, 404), wyniki
+    status, html = panel("/kpi?region=PL")
+    tytul = re.search(r"<title>([^<]*)</title>", html)
+    zgodne = bool(tytul) and tytul.group(1).strip() == "Wskaźniki: PL · TADS"
+    return zgodne, tytul.group(1).strip() if tytul else "brak <title>"
 
 
-@sprawdzenie(1, "Raport: /raporty/ i /raporty/2027 daja 200")
+@sprawdzenie(1, "Cztery kafelki wygenerowane makrem kafelek")
 def _():
-    wyniki = kody(zadanie("/raporty/"), zadanie("/raporty/2027"))
-    return wyniki == (200, 200), wyniki
+    liczba = panel("/kpi?region=PL")[1].count('class="kafelek"')
+    return liczba == 4, liczba
 
 
-@sprawdzenie(1, "Zakres roku w adresie: 2031, 2019 i abc daja 404")
+@sprawdzenie(1, "Tabela regionow: oceny z makra (CZ niska, DE norma, PL wysoka)")
 def _():
-    wyniki = kody(zadanie("/raporty/2027"), zadanie("/raporty/2031"), zadanie("/raporty/2019"), zadanie("/raporty/abc"))
-    return wyniki == (200, 404, 404, 404), wyniki
+    oceny = re.findall(r'class="ocena (\w+)"', panel("/kpi")[1])
+    return oceny == ["niska", "norma", "wysoka"], oceny
 
 
-@sprawdzenie(1, "Adres /raporty/2026 przekierowuje (308) na /raporty/")
+@sprawdzenie(1, "Panel regionu /regiony/DE: naglowek Wskazniki: DE")
 def _():
-    odp = zadanie("/raporty/2026")
-    lokalizacja = (odp.headers.get("Location") or "").replace("http://localhost", "")
-    return (odp.status_code, lokalizacja) == (308, "/raporty/"), (odp.status_code, lokalizacja)
+    status, html = panel("/regiony/DE")
+    return status == 200 and "<h1>Wskaźniki: DE</h1>" in html, status
 
 
-@sprawdzenie(1, "Dwie reguly dla jednego punktu koncowego panel.raport")
+@sprawdzenie(1, "Makro ocena: parametr cel z wartoscia domyslna")
 def _():
     wymagana_aplikacja()
-    reguly = [str(r) for r in STAN["aplikacja"].url_map.iter_rules() if r.endpoint == "panel.raport"]
-    return len(reguly) == 2, sorted(reguly)
+    szablon = STAN["aplikacja"].jinja_env.from_string(
+        '{% from "macros.html" import ocena %}{{ ocena(0.22) }}|{{ ocena(0.22, 0.2) }}'
+    )
+    wynik = szablon.render()
+    domyslny, wlasny = wynik.split("|")
+    zgodne = "w normie" in domyslny and "powyżej celu" in wlasny
+    return zgodne, wynik.replace("\n", " ")[:40]
 
 
 # ------------------------------------------------------------------ zadanie 2
 
-@sprawdzenie(2, "Adres /raporty/nowy: GET 200, DELETE 405")
+@sprawdzenie(2, "Filtry wlasne zarejestrowane: zl, procent, liczba, data_pl")
 def _():
-    wyniki = kody(zadanie("/raporty/nowy"), zadanie("/raporty/nowy", "DELETE"))
-    return wyniki == (200, 405), wyniki
+    nazwy = ("zl", "procent", "liczba", "data_pl")
+    wymagana_aplikacja()
+    brakujace = [n for n in nazwy if n not in STAN["aplikacja"].jinja_env.filters]
+    return not brakujace, "komplet" if not brakujace else "brak: " + ", ".join(brakujace)
 
 
-@sprawdzenie(2, "Zapis POST rok=2027, region=PL: 303 i Location /raporty/2027")
+@sprawdzenie(2, "Filtr liczba: 1234567.5 z jednym miejscem → 1 234 567,5")
 def _():
-    odp = zadanie("/raporty/nowy", "POST", data={"rok": "2027", "region": "PL"})
-    lokalizacja = (odp.headers.get("Location") or "").replace("http://localhost", "")
-    return (odp.status_code, lokalizacja) == (303, "/raporty/2027"), (odp.status_code, lokalizacja)
+    wynik = filtr_wlasny("liczba")(1234567.5, 1)
+    return wynik == f"1{TWARDA}234{TWARDA}567,5", repr(wynik)
 
 
-@sprawdzenie(2, "Raport 2027 po zapisie: Zapisane raporty: 1")
+@sprawdzenie(2, "Filtr zl: 37900 → 37 900,00 zl (twarde spacje)")
 def _():
-    tresc = zadanie("/raporty/2027").get_data(as_text=True)
-    return "Zapisane raporty: 1" in tresc, tresc[:46]
+    wynik = filtr_wlasny("zl")(37900)
+    return wynik == f"37{TWARDA}900,00{TWARDA}zł", repr(wynik)
 
 
-@sprawdzenie(2, "Zapis za rok domyslny: Location /raporty/ (adres kanoniczny)")
+@sprawdzenie(2, "Filtr procent: 0.2639 → 26,4% oraz 26,39% dla dwoch miejsc")
 def _():
-    odp = zadanie("/raporty/nowy", "POST", data={"rok": "2026", "region": "DE"})
-    lokalizacja = (odp.headers.get("Location") or "").replace("http://localhost", "")
-    return (odp.status_code, lokalizacja) == (303, "/raporty/"), (odp.status_code, lokalizacja)
+    f = filtr_wlasny("procent")
+    wynik = (f(0.2639), f(0.2639, 2))
+    return wynik == ("26,4%", "26,39%"), wynik
 
 
-@sprawdzenie(2, "Dane niepoprawne: rok=abc i nieznany region daja 400")
+@sprawdzenie(2, "Filtr data_pl: obiekt date i tekst RRRR-MM-DD → 08.01.2026")
 def _():
-    wyniki = kody(
-        zadanie("/raporty/nowy", "POST", data={"rok": "abc", "region": "PL"}),
-        zadanie("/raporty/nowy", "POST", data={"rok": "2027", "region": "XX"}),
-    )
-    return wyniki == (400, 400), wyniki
+    f = filtr_wlasny("data_pl")
+    wynik = (f(date(2026, 1, 8)), f("2026-01-08"))
+    return wynik == ("08.01.2026", "08.01.2026"), wynik
 
 
-@sprawdzenie(2, "Rok poza zakresem (2045) daje 422")
+@sprawdzenie(2, "Kafelek Przychod dla PL: 37 900,00 zl")
 def _():
-    kod = zadanie("/raporty/nowy", "POST", data={"rok": "2045", "region": "PL"}).status_code
-    return kod == 422, kod
+    html = panel("/kpi?region=PL")[1]
+    zgodne = f"<b>37{TWARDA}900,00{TWARDA}zł</b>" in html.replace("\n", "").replace("  ", "")
+    return zgodne, "kafelek z filtrem zl" if zgodne else "brak sformatowanej kwoty"
 
 
-@sprawdzenie(2, "Adres wycofany /stary-panel: 301 i Location /kpi")
+@sprawdzenie(2, "Marza PL: 26,4% w kafelku i w tabeli")
 def _():
-    odp = zadanie("/stary-panel")
-    lokalizacja = (odp.headers.get("Location") or "").replace("http://localhost", "")
-    return (odp.status_code, lokalizacja) == (301, "/kpi"), (odp.status_code, lokalizacja)
+    liczba = panel("/kpi?region=PL")[1].count("26,4%")
+    return liczba >= 2, liczba
 
 
-@sprawdzenie(2, "validators.py: funkcja parametr_int")
+@sprawdzenie(2, "Procesor kontekstu: nawigacja z regionami CZ, DE, PL")
 def _():
-    plik_istnieje("app/validators.py")
-    modul = importlib.import_module("app.validators")
-    return callable(getattr(modul, "parametr_int", None)), "parametr_int"
+    html = panel("/kpi")[1]
+    brakujace = [k for k in ("CZ", "DE", "PL") if f'href="/regiony/{k}"' not in html]
+    return not brakujace, "komplet" if not brakujace else "brak: " + ", ".join(brakujace)
 
 
-@sprawdzenie(2, "API: brak roku 400, abc 400, 2040 422, 2027 200")
+@sprawdzenie(2, "Procesor kontekstu: stopka z biezacym rokiem")
 def _():
-    wyniki = kody(
-        zadanie("/api/raporty"),
-        zadanie("/api/raporty?rok=abc"),
-        zadanie("/api/raporty?rok=2040"),
-        zadanie("/api/raporty?rok=2027"),
-    )
-    return wyniki == (400, 400, 422, 200), wyniki
+    html = panel("/kpi")[1]
+    stopka = re.search(r"<footer>(.*?)</footer>", html, re.S)
+    rok = str(date.today().year)
+    zgodne = bool(stopka) and rok in stopka.group(1)
+    return zgodne, rok if zgodne else "brak roku w stopce"
+
+
+@sprawdzenie(2, "Aktywny region wyrozniony w nawigacji")
+def _():
+    def aktywne(adres):
+        html = panel(adres)[1]
+        return re.findall(r'<a[^>]*class="aktywna"[^>]*>\s*(\w+)\s*</a>', html)
+    wynik = (aktywne("/regiony/DE"), aktywne("/kpi?region=PL"))
+    return wynik == (["DE"], ["PL"]), wynik
+
+
+@sprawdzenie(2, "Data w panelu w formacie DD.MM.RRRR (Stan na dzien)")
+def _():
+    html = panel("/kpi")[1]
+    dopasowanie = re.search(r"Stan na dzień (\d{2}\.\d{2}\.\d{4})", html)
+    zgodne = bool(dopasowanie) and dopasowanie.group(1) == date.today().strftime("%d.%m.%Y")
+    return zgodne, dopasowanie.group(1) if dopasowanie else "brak daty"
+
+
+@sprawdzenie(2, "Filtry wbudowane: Regiony w zbiorze: 3 (CZ, DE, PL)")
+def _():
+    html = panel("/kpi")[1]
+    zgodne = "Regiony w zbiorze: 3 (CZ, DE, PL)" in html
+    return zgodne, "tak" if zgodne else "brak wiersza z liczba regionow"
 
 
 # ------------------------------------------------------------------ zadanie 3
 
-@sprawdzenie(3, "Naglowek X-Czas-Ms w odpowiedziach 200 i 404")
+def zapisz(rok, region):
+    odp = zadanie("/raporty/nowy", "POST", data={"rok": str(rok), "region": region})
+    return odp
+
+
+@sprawdzenie(3, "Zapis raportu: 303 i komunikat flash na stronie raportu")
 def _():
-    odp_ok, odp_404 = zadanie("/"), zadanie("/nie-ma-takiego-adresu")
-    zgodne = "X-Czas-Ms" in odp_ok.headers and "X-Czas-Ms" in odp_404.headers and odp_404.status_code == 404
-    return zgodne, (odp_ok.headers.get("X-Czas-Ms"), odp_404.headers.get("X-Czas-Ms"))
+    odp = zapisz(2027, "PL")
+    lokalizacja = (odp.headers.get("Location") or "").replace("http://localhost", "")
+    html = tresc(zadanie("/raporty/2027"))
+    komunikat = '<p class="komunikat sukces">Raport za rok 2027 został zapisany</p>'
+    zgodne = (odp.status_code, lokalizacja) == (303, "/raporty/2027") and komunikat in html
+    return zgodne, (odp.status_code, "komunikat" if komunikat in html else "brak komunikatu")
 
 
-@sprawdzenie(3, "decorators.py: wymagany_parametr zachowuje nazwe widoku")
+@sprawdzenie(3, "Komunikat flash widoczny raz, potem zuzyty")
 def _():
-    plik_istnieje("app/decorators.py")
-    wymagana_aplikacja()
-    widok = STAN["aplikacja"].view_functions.get("api.raporty")
-    if widok is None:
-        raise Brak("brak punktu koncowego api.raporty")
-    return widok.__name__ == "raporty", widok.__name__
+    zapisz(2028, "DE")
+    pierwszy = tresc(zadanie("/raporty/2028"))
+    drugi = tresc(zadanie("/raporty/2028"))
+    zgodne = "został zapisany" in pierwszy and "został zapisany" not in drugi
+    return zgodne, "raz" if zgodne else "komunikat nie wyswietlony raz"
 
 
-@sprawdzenie(3, "API: brak roku daje 400 i dokument JSON (blad, kod)")
+@sprawdzenie(3, "Strona raportu z szablonu: tytul i licznik zapisanych raportow")
 def _():
-    odp = zadanie("/api/raporty")
-    dane = odp.get_json(silent=True) or {}
-    zgodne = odp.status_code == 400 and dane.get("kod") == 400 and bool(dane.get("blad"))
-    return zgodne, f"{odp.status_code} {odp.mimetype}"
+    html = tresc(zadanie("/raporty/2027"))
+    tytul = re.search(r"<title>([^<]*)</title>", html)
+    zgodne = bool(tytul) and tytul.group(1).strip() == "Raport 2027 · TADS" and "Zapisane raporty: 1" in html
+    return zgodne, tytul.group(1).strip() if tytul else "brak <title>"
 
 
-@sprawdzenie(3, "API: rok=2040 daje 422 i dokument JSON z kodem 422")
+@sprawdzenie(3, "Blad 404 dla przegladarki: strona z szablonu")
 def _():
-    odp = zadanie("/api/raporty?rok=2040")
-    dane = odp.get_json(silent=True) or {}
-    return (odp.status_code, dane.get("kod")) == (422, 422), f"{odp.status_code} {odp.mimetype}"
-
-
-@sprawdzenie(3, "Poza API: blad jako tekst HTML z kodem w <h1>")
-def _():
-    odp = zadanie("/regiony/XX")
-    zgodne = odp.status_code == 404 and odp.mimetype == "text/html" and "<h1>404</h1>" in odp.get_data(as_text=True)
-    return zgodne, f"{odp.status_code} {odp.mimetype}"
-
-
-@sprawdzenie(3, "Odpowiedz HTML nie powtarza wartosci z adresu")
-def _():
-    odp = zadanie("/kpi?region=%3Cb%3EPL%3C%2Fb%3E")
-    tresc = odp.get_data(as_text=True)
-    zgodne = odp.status_code == 404 and "<h1>404</h1>" in tresc and "<b>" not in tresc
+    odp = zadanie("/kpi?region=XX")
+    html = tresc(odp)
+    tytul = re.search(r"<title>([^<]*)</title>", html)
+    zgodne = (
+        odp.status_code == 404 and bool(tytul) and tytul.group(1).strip() == "Błąd 404 · TADS"
+        and "<h1>404</h1>" in html and "<p>Nieznany region: XX</p>" in html
+    )
     return zgodne, odp.status_code
 
 
-@sprawdzenie(3, "Przekierowanie 308 zachowane mimo wspolnej procedury bledow")
+@sprawdzenie(3, "Strona bledu zachowuje nawigacje i stopke")
 def _():
-    procedura_dziala = "<h1>404</h1>" in zadanie("/regiony/XX").get_data(as_text=True)
-    odp = zadanie("/raporty/2026")
-    zgodne = procedura_dziala and odp.status_code == 308 and "<h1>308</h1>" not in odp.get_data(as_text=True)
-    return zgodne, odp.status_code if procedura_dziala else "brak wspolnej procedury bledow"
+    html = tresc(zadanie("/kpi?region=XX"))
+    zgodne = "<nav>" in html and "<footer>" in html and "<h1>404</h1>" in html
+    return zgodne, "nav i footer" if zgodne else "brak ukladu wspolnego"
 
 
-@sprawdzenie(3, "Interfejs pod /api i /api/v2 (blueprinty api i api_v2)")
+@sprawdzenie(3, "Blad 404 w /api: dokument JSON obok strony HTML")
 def _():
-    wymagana_aplikacja()
-    nazwy = sorted(n for n in STAN["aplikacja"].blueprints if n.startswith("api"))
-    wyniki = kody(zadanie("/api/raporty?rok=2027"), zadanie("/api/v2/raporty?rok=2027"))
-    return nazwy == ["api", "api_v2"] and wyniki == (200, 200), (nazwy, wyniki)
+    html = tresc(zadanie("/kpi?region=XX"))
+    odp = zadanie("/api/kpi?region=XX")
+    dane = odp.get_json(silent=True) or {}
+    zgodne = (
+        "<h1>404</h1>" in html and "<p>Nieznany region: XX</p>" in html
+        and odp.status_code == 404 and dane.get("kod") == 404 and bool(dane.get("blad"))
+    )
+    return zgodne, f"{odp.status_code} {odp.mimetype}"
+
+
+@sprawdzenie(3, "Escapowanie: region=<script> daje encje, bez znacznika")
+def _():
+    odp = zadanie("/kpi?region=%3Cscript%3E")
+    html = tresc(odp)
+    zgodne = odp.status_code == 404 and "&lt;script&gt;" in html and "<script>" not in html
+    return zgodne, odp.status_code
+
+
+@sprawdzenie(3, "Nieistniejacy adres: strona bledu z nawigacja, bez wyjatku")
+def _():
+    odp = zadanie("/nie-ma-takiego-adresu")
+    html = tresc(odp)
+    zgodne = odp.status_code == 404 and "<h1>404</h1>" in html and "<nav>" in html
+    return zgodne, odp.status_code
 
 
 # --------------------------------------------------------------------- raport
@@ -299,7 +353,7 @@ def main():
     if STAN["aplikacja"] is not None:
         STAN["klient"] = STAN["aplikacja"].test_client()
 
-    print("Weryfikacja cwiczen 3")
+    print("Weryfikacja cwiczen 4")
     print(f"Katalog: {KORZEN}")
     print(f"Uklad aplikacji: {STAN['uklad']}")
     razem = {}
@@ -314,8 +368,8 @@ def main():
             zgodne = False
             szczegol = str(blad) if isinstance(blad, Brak) else f"{type(blad).__name__}: {blad}"
         zgodne = bool(zgodne)
-        szczegol = str(szczegol).replace("\n", " ")[:42]
-        print(f"[{'OK  ' if zgodne else 'BLAD'}] Z{numer} {opis:60s} {szczegol}")
+        szczegol = str(szczegol).replace("\n", " ")[:40]
+        print(f"[{'OK  ' if zgodne else 'BLAD'}] Z{numer} {opis:62s} {szczegol}")
         razem.setdefault(numer, []).append(zgodne)
     print("-" * 74)
     for numer in sorted(razem):

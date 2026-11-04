@@ -1,0 +1,10 @@
+{# partials/navigation.html #}
+<nav>
+    <a href="{{ url_for('panel.kpi') }}">Panel</a>
+    {% for kod in regiony %}
+        <a href="{{ url_for('panel.region', kod=kod) }}"
+           {% if kod in ((request.view_args or {}).get('kod'), request.args.get('region')) %}class="aktywna"{% endif %}>
+            {{ kod }}
+        </a>
+    {% endfor %}
+</nav>

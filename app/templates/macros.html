@@ -1,0 +1,17 @@
+{# macros.html #}
+{% macro kafelek(etykieta, wartosc, jednostka="") -%}
+<div class="kafelek">
+    <span>{{ etykieta }}</span>
+    <b>{{ wartosc }}{{ jednostka }}</b>
+</div>
+{%- endmacro %}
+
+{% macro ocena(marza, cel=0.25) -%}
+{% if marza >= cel %}
+    <span class="ocena wysoka">powyżej celu</span>
+{% elif marza > cel - 0.05 %}
+    <span class="ocena norma">w normie</span>
+{% else %}
+    <span class="ocena niska">poniżej celu</span>
+{% endif %}
+{%- endmacro %}
