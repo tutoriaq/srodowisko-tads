@@ -7,7 +7,9 @@ from app.converters import RegionConverter
 from app.errors import zarejestruj_obsluge_bledow
 from app.filters import zarejestruj_filtry
 from app.services import dostepne_regiony
+from flask_wtf.csrf import CSRFProtect
 
+csrf = CSRFProtect()
 
 def create_app(nazwa_konfiguracji="rozwojowa"):
     app = Flask(__name__)
@@ -29,7 +31,7 @@ def create_app(nazwa_konfiguracji="rozwojowa"):
             response.headers["X-Czas-Ms"] = f"{elapsed_ms:.2f}"
         return response
 
-    # 3. Filtry własne i procesor kontekstu[cite: 5, 6]
+    # 3. Filtry własne i procesor kontekstu
     zarejestruj_filtry(app)
 
     @app.context_processor
@@ -39,10 +41,12 @@ def create_app(nazwa_konfiguracji="rozwojowa"):
             "rok_biezacy": date.today().year,
         }
 
-    # 4. Rejestracja wspólnej obsługi błędów[cite: 7]
+    # 4. Rejestracja wspólnej obsługi błędów
     zarejestruj_obsluge_bledow(app)
 
-    # 5. Rejestracja blueprintów (w tym wersjonowanie api_v2)
+    # 5. Inicjalizacja CSRF oraz rejestracja blueprintów
+    csrf.init_app(app)
+
     from app.routes_api import api_bp
     from app.routes_panel import panel_bp
 

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "macros.html" import pole %}
+
+{% block tytul %}Nowy raport{% endblock %}
+
+{% block tresc %}
+<h1>Nowy raport</h1>
+<form method="post" novalidate>
+    {{ formularz.hidden_tag() }}
+    {{ pole(formularz.rok) }}
+    {{ pole(formularz.region) }}
+    {{ pole(formularz.szczegoly) }}
+    {{ pole(formularz.uwagi) }}
+    {{ formularz.zapisz() }}
+</form>
+{% endblock %}
