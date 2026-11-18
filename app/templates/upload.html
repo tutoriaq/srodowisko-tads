@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "macros.html" import pole %}
+
+{% block tytul %}Wczytanie zbioru{% endblock %}
+
+{% block tresc %}
+<h1>Wczytanie zbioru</h1>
+<form method="post" enctype="multipart/form-data" novalidate>
+    {{ formularz.hidden_tag() }}
+    {{ pole(formularz.plik) }}
+    {{ formularz.wczytaj() }}
+</form>
+{% endblock %}

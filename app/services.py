@@ -75,3 +75,29 @@ def zestawienie_regionow(sciezka):
     """Zwraca listę słowników/obiektów ze wskaźnikami dla wszystkich regionów posortowanych alfabetycznie."""
     kody = sorted(dostepne_regiony(sciezka))
     return [policz_wskazniki(sciezka, kod) for kod in kody]
+
+import io
+
+def wczytaj_zbior(strumien) -> int:
+    try:
+        zawartosc = strumien.read()
+        if isinstance(zawartosc, bytes):
+            tekst = zawartosc.decode("utf-8")
+        else:
+            tekst = str(zawartosc)
+    except (UnicodeDecodeError, AttributeError) as e:
+        raise ValueError("Niepoprawna zawartość pliku (brak wsparcia dla formatu/kodowania)") from e
+
+    f = io.StringIO(tekst)
+    reader = csv.DictReader(f)
+    
+    wymagane_kolumny = {"data", "region", "przychod", "koszt"}
+    pola_naglowka = set(reader.fieldnames or [])
+    
+    brakujace = wymagane_kolumny - pola_naglowka
+    if brakujace:
+        brak_str = ", ".join(sorted(brakujace))
+        raise ValueError(f"brak kolumn: {brak_str}")
+        
+    wiersze = list(reader)
+    return len(wiersze)

@@ -35,3 +35,13 @@ class RaportForm(FormularzBazowy):
     def validate_rok(self, pole):
         if (pole.data, self.region.data) in self._istniejace:
             raise ValidationError("Raport za ten rok i region już istnieje")
+
+from flask_wtf.file import FileAllowed, FileField, FileRequired
+from wtforms import SubmitField
+
+class ZbiorForm(FormularzBazowy):
+    plik = FileField("Zbiór zamówień (CSV)", validators=[
+        FileRequired(message="Wskaż plik do wczytania"),
+        FileAllowed(["csv"], message="Dopuszczalny jest wyłącznie format CSV")
+    ])
+    wczytaj = SubmitField("Wczytaj zbiór")
