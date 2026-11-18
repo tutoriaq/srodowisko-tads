@@ -6,6 +6,7 @@ from flask import (
     render_template,
     request,
     url_for,
+    flash,
 )
 from app.services import (
     dostepne_regiony,
@@ -14,8 +15,8 @@ from app.services import (
     zapisz_raport,
     zestawienie_regionow,
 )
+from app.forms import FiltrForm
 from datetime import date
-from flask import flash
 
 panel_bp = Blueprint("panel", __name__)
 
@@ -30,17 +31,25 @@ def index():
 @panel_bp.get("/kpi")
 def kpi():
     path = current_app.config["SCIEZKA_DANYCH"]
-    region = request.args.get("region")
+    formularz = FiltrForm(request.args)
     regiony = dostepne_regiony(path)
+    
+    # Konfiguracja listy wyboru regionów (pusta opcja + dostępne regiony)
+    formularz.region.choices = [("", "wszystkie")] + [(r, r) for r in regiony]
 
-    if region and region not in regiony:
-        abort(404, description=f"Nieznany region: {region}")
+    region = rok = None
+    if formularz.validate():
+        region = formularz.region.data or None
+        rok = formularz.rok.data or None
+    else:
+        flash("Kryteria zawężenia zostały pominięte", "warning")
 
-    stats = policz_wskazniki(path, region)
+    stats = policz_wskazniki(path, region, rok)
     zestawienie = zestawienie_regionow(path)
 
     return render_template(
         "panel.html",
+        formularz=formularz,
         wskazniki=stats,
         zestawienie=zestawienie,
         dzisiaj=date.today()

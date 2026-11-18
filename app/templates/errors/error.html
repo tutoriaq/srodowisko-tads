@@ -1,0 +1,9 @@
+{# errors/error.html #}
+{% extends "base.html" %}
+
+{% block tytul %}Błąd {{ kod }}{% endblock %}
+
+{% block tresc %}
+<h1>{{ kod }}</h1>
+<p>{{ opis }}</p>
+{% endblock %}

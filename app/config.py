@@ -8,6 +8,7 @@ class Config:
     SECRET_KEY = os.environ.get("SECRET_KEY")
     SCIEZKA_DANYCH = BASE_DIR / "dane" / "zamowienia.csv"
     DEBUG = False
+    WTF_I18N_ENABLED = False
 
 
 class RozwojowaConfig(Config):

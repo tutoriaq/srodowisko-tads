@@ -15,3 +15,13 @@
     <span class="ocena niska">poniżej celu</span>
 {% endif %}
 {%- endmacro %}
+
+{% macro pole(p) -%}
+<div class="pole{{ ' blad' if p.errors }}">
+    {{ p.label }}
+    {{ p(**kwargs) }}
+    {% for b in p.errors %}
+    <p class="komunikat-pola">{{ b }}</p>
+    {% endfor %}
+</div>
+{% endmacro %}

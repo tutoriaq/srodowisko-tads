@@ -1,12 +1,19 @@
-{# panel.html #}
 {% extends "base.html" %}
-{% from "macros.html" import kafelek, ocena %}
+{% from "macros.html" import kafelek, ocena, pole %}
 
 {% block tytul %}Wskaźniki: {{ wskazniki.region }}{% endblock %}
 
 {% block tresc %}
 <h1>Wskaźniki: {{ wskazniki.region }}</h1>
 <p>Stan na dzień {{ dzisiaj | data_pl }}. Regiony w zbiorze: {{ regiony | length }} ({{ regiony | join(", ") }}).</p>
+
+{% if formularz %}
+<form method="get" class="formularz-filtru">
+    {{ pole(formularz.region) }}
+    {{ pole(formularz.rok) }}
+    <button type="submit">Zastosuj</button>
+</form>
+{% endif %}
 
 <section class="kafelki">
     {{ kafelek("Przychód", wskazniki.przychod | zl) }}

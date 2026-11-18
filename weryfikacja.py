@@ -1,21 +1,23 @@
-"""Weryfikacja rezultatów ćwiczeń 4 (Szablony HTML i system Jinja2).
+"""Weryfikacja rezultatów ćwiczeń 5 (Formularze i interakcja użytkownika).
 
 Plik należy umieścić w katalogu projektu srodowisko-tads (obok katalogu app/)
 i uruchamiać przy aktywnym środowisku wirtualnym:
 
-    python verify_ex4.py
+    python verify_ex5.py
 
 Skrypt nie zmienia żadnych plików. Żądania wysyła bezpośrednio do obiektu aplikacji
 (test_client), więc serwer nie musi być uruchomiony; zapisane w trakcie sprawdzania
-raporty istnieją tylko w pamięci procesu skryptu. Można go uruchamiać po każdym
-zadaniu — liczba sprawdzeń zgodnych powinna rosnąć. Nazwy w raporcie zapisano bez
-znaków diakrytycznych, aby były czytelne w każdej konsoli.
+raporty istnieją tylko w pamięci procesu skryptu. Token CSRF pobierany jest z dokumentu
+formularza, tak jak robi to przeglądarka. Można uruchamiać skrypt po każdym zadaniu —
+liczba sprawdzeń zgodnych powinna rosnąć. Nazwy w raporcie zapisano bez znaków
+diakrytycznych, aby były czytelne w każdej konsoli.
 """
 
 import importlib
+import importlib.util
+import io
 import re
 import sys
-from datetime import date
 from pathlib import Path
 
 KORZEN = Path(__file__).resolve().parent
@@ -30,8 +32,6 @@ try:  # odpowiednik wczytywania pliku .env przez polecenie flask
 except ImportError:
     pass
 
-TWARDA = "\u00a0"
-
 
 class Brak(Exception):
     """Brak elementu wymaganego przez sprawdzenie; komunikat trafia do raportu."""
@@ -39,6 +39,7 @@ class Brak(Exception):
 
 STAN = {"aplikacja": None, "uklad": None, "klient": None}
 SPRAWDZENIA = []
+CSV_POPRAWNY = b"data,region,przychod,koszt\n2026-01-08,PL,1,1\n2026-01-09,DE,2,1\n"
 
 
 def sprawdzenie(zadanie, opis):
@@ -80,270 +81,331 @@ def tresc(odp):
     return odp.get_data(as_text=True)
 
 
-def zrodlo(sciezka):
-    plik = KORZEN / "app" / "templates" / sciezka
-    if not plik.is_file():
-        raise Brak(f"brak pliku app/templates/{sciezka}")
-    return plik.read_text(encoding="utf-8")
+def token(adres):
+    """Pobiera token CSRF z dokumentu formularza (pusty tekst, gdy go brak)."""
+    dopasowanie = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', tresc(zadanie(adres)))
+    return dopasowanie.group(1) if dopasowanie else ""
 
 
-def filtr(nazwa):
+def wyslij(adres, dane, z_tokenem=True, **opcje):
+    dane = dict(dane)
+    if z_tokenem:
+        dane["csrf_token"] = token(adres)
+    return zadanie(adres, "POST", data=dane, **opcje)
+
+
+def plik(adres, nazwa, zawartosc, typ="text/csv", z_tokenem=True):
+    dane = {"csrf_token": token(adres) if z_tokenem else ""}
+    if nazwa is not None:
+        dane["plik"] = (io.BytesIO(zawartosc), nazwa, typ)
+    return zadanie(adres, "POST", data=dane, content_type="multipart/form-data")
+
+
+def lokalizacja(odp):
+    return (odp.headers.get("Location") or "").replace("http://localhost", "")
+
+
+def plik_istnieje(sciezka):
+    if not (KORZEN / sciezka).is_file():
+        raise Brak(f"brak pliku {sciezka}")
+    return (KORZEN / sciezka).read_text(encoding="utf-8")
+
+
+def formularz(nazwa_klasy):
+    """Zwraca instancję formularza z app.forms utworzoną w kontekście żądania."""
+    if not (KORZEN / "app" / "forms.py").is_file():
+        raise Brak("brak pliku app/forms.py")
+    forms = importlib.import_module("app.forms")
+    klasa = getattr(forms, nazwa_klasy, None)
+    if klasa is None:
+        raise Brak(f"brak klasy {nazwa_klasy} w app/forms.py")
     wymagana_aplikacja()
-    funkcja = STAN["aplikacja"].jinja_env.filters.get(nazwa)
-    if funkcja is None:
-        raise Brak(f"brak filtru {nazwa}")
-    return funkcja
+    with STAN["aplikacja"].test_request_context("/kpi?region=PL"):
+        return klasa()
 
 
-def filtr_wlasny(nazwa):
-    """Filtry wbudowane (np. 'length') nie liczą się jako filtry własne."""
-    funkcja = filtr(nazwa)
-    if getattr(funkcja, "__module__", "").startswith("jinja2"):
-        raise Brak(f"filtr {nazwa} nie jest filtrem wlasnym")
-    return funkcja
-
-
-def panel(adres):
-    odp = zadanie(adres)
-    return odp.status_code, tresc(odp)
+def sciezka_danych():
+    return STAN["aplikacja"].config["SCIEZKA_DANYCH"]
 
 
 # ------------------------------------------------------------------ zadanie 1
 
-@sprawdzenie(1, "Arkusz styles.css serwowany: 200 i text/css")
+@sprawdzenie(1, "Flask-WTF zainstalowany i zapisany w requirements.txt")
 def _():
-    odp = zadanie("/static/styles.css")
-    return (odp.status_code, odp.mimetype) == (200, "text/css"), (odp.status_code, odp.mimetype)
+    from importlib import metadata
+
+    try:
+        wersja = metadata.version("flask-wtf")
+    except metadata.PackageNotFoundError:
+        return False, "brak pakietu Flask-WTF w srodowisku"
+    zapisany = "flask-wtf" in (KORZEN / "requirements.txt").read_text(encoding="utf-8").lower()
+    return zapisany, f"{wersja}" if zapisany else "brak wpisu w requirements.txt"
 
 
-@sprawdzenie(1, "Szablony: base, macros, panel, partials/navigation i messages")
-def _():
-    brakujace = [n for n in ("base.html", "macros.html", "panel.html", "partials/navigation.html", "partials/messages.html")
-                 if not (KORZEN / "app" / "templates" / n).is_file()]
-    return not brakujace, "komplet" if not brakujace else "brak: " + ", ".join(brakujace)
-
-
-@sprawdzenie(1, "panel.html dziedziczy po base.html, bez wlasnego naglowka")
-def _():
-    kod = zrodlo("panel.html")
-    zgodne = bool(re.search(r"\{%-?\s*extends\s+[\"']base\.html[\"']", kod)) and "<html" not in kod.lower()
-    return zgodne, "extends base.html" if zgodne else "brak extends lub wlasny <html>"
-
-
-@sprawdzenie(1, "Uklad wspolny: arkusz przez url_for, nav, main i footer")
-def _():
-    status, html = panel("/kpi?region=PL")
-    elementy = ['href="/static/styles.css"', "<nav>", "<main>", "<footer>"]
-    brakujace = [e for e in elementy if e not in html]
-    return status == 200 and not brakujace, status if not brakujace else "brak: " + ", ".join(brakujace)
-
-
-@sprawdzenie(1, "Tytul z bloku: <title>Wskazniki: PL · TADS</title>")
-def _():
-    status, html = panel("/kpi?region=PL")
-    tytul = re.search(r"<title>([^<]*)</title>", html)
-    zgodne = bool(tytul) and tytul.group(1).strip() == "Wskaźniki: PL · TADS"
-    return zgodne, tytul.group(1).strip() if tytul else "brak <title>"
-
-
-@sprawdzenie(1, "Cztery kafelki wygenerowane makrem kafelek")
-def _():
-    liczba = panel("/kpi?region=PL")[1].count('class="kafelek"')
-    return liczba == 4, liczba
-
-
-@sprawdzenie(1, "Tabela regionow: oceny z makra (CZ niska, DE norma, PL wysoka)")
-def _():
-    oceny = re.findall(r'class="ocena (\w+)"', panel("/kpi")[1])
-    return oceny == ["niska", "norma", "wysoka"], oceny
-
-
-@sprawdzenie(1, "Panel regionu /regiony/DE: naglowek Wskazniki: DE")
-def _():
-    status, html = panel("/regiony/DE")
-    return status == 200 and "<h1>Wskaźniki: DE</h1>" in html, status
-
-
-@sprawdzenie(1, "Makro ocena: parametr cel z wartoscia domyslna")
+@sprawdzenie(1, "Konfiguracja: WTF_I18N_ENABLED wylaczone")
 def _():
     wymagana_aplikacja()
-    szablon = STAN["aplikacja"].jinja_env.from_string(
-        '{% from "macros.html" import ocena %}{{ ocena(0.22) }}|{{ ocena(0.22, 0.2) }}'
-    )
-    wynik = szablon.render()
-    domyslny, wlasny = wynik.split("|")
-    zgodne = "w normie" in domyslny and "powyżej celu" in wlasny
-    return zgodne, wynik.replace("\n", " ")[:40]
+    wartosc = STAN["aplikacja"].config.get("WTF_I18N_ENABLED")
+    return wartosc is False, wartosc
+
+
+@sprawdzenie(1, "Makro pole w macros.html obok makr kafelek i ocena")
+def _():
+    zrodlo = plik_istnieje("app/templates/macros.html")
+    brakujace = [n for n in ("pole", "kafelek", "ocena") if not re.search(r"\{%-?\s*macro\s+" + n + r"\s*\(", zrodlo)]
+    return not brakujace, "pole, kafelek, ocena" if not brakujace else "brak makr: " + ", ".join(brakujace)
+
+
+@sprawdzenie(1, "FormularzBazowy z komunikatami po polsku i FiltrForm")
+def _():
+    forms = importlib.import_module("app.forms") if (KORZEN / "app" / "forms.py").is_file() else None
+    if forms is None:
+        raise Brak("brak pliku app/forms.py")
+    bazowy = getattr(forms, "FormularzBazowy", None)
+    if bazowy is None or not hasattr(forms, "FiltrForm"):
+        raise Brak("brak klasy FormularzBazowy lub FiltrForm")
+    jezyki = list(getattr(bazowy.Meta, "locales", []) or [])
+    return jezyki == ["pl"], jezyki
+
+
+@sprawdzenie(1, "FiltrForm: pola region i rok, bez tokenu CSRF")
+def _():
+    f = formularz("FiltrForm")
+    pola = sorted(n for n in f._fields)
+    zgodne = "region" in pola and "rok" in pola and "csrf_token" not in pola
+    return zgodne, pola
+
+
+@sprawdzenie(1, "services: policz_wskazniki z parametrem rok")
+def _():
+    wymagana_aplikacja()
+    uslugi = importlib.import_module("app.services")
+    pusty = uslugi.policz_wskazniki(sciezka_danych(), None, 2025)
+    de = uslugi.policz_wskazniki(sciezka_danych(), "DE", 2026)
+    wynik = (pusty["liczba_zamowien"], pusty["marza"], de["liczba_zamowien"])
+    return wynik == (0, 0.0, 3), wynik
+
+
+@sprawdzenie(1, "GET /kpi: 200 i formularz z polami region oraz rok")
+def _():
+    odp = zadanie("/kpi")
+    html = tresc(odp)
+    zgodne = odp.status_code == 200 and 'name="region"' in html and 'name="rok"' in html
+    return zgodne, odp.status_code
+
+
+@sprawdzenie(1, "Filtr region=DE, rok=2026: wartosci zachowane w formularzu")
+def _():
+    html = tresc(zadanie("/kpi?region=DE&rok=2026"))
+    zgodne = bool(re.search(r"<option[^>]*selected[^>]*value=\"DE\"|<option[^>]*value=\"DE\"[^>]*selected", html)) and 'value="2026"' in html
+    return zgodne, "DE wybrane, rok 2026" if zgodne else "brak zachowanych wartosci"
+
+
+@sprawdzenie(1, "Nieznany region: 200 i komunikat flash o pominieciu kryteriow")
+def _():
+    odp = zadanie("/kpi?region=XX")
+    zgodne = odp.status_code == 200 and "Kryteria zawężenia zostały pominięte" in tresc(odp)
+    return zgodne, odp.status_code
+
+
+@sprawdzenie(1, "Rok poza zakresem: komunikat przy polu i zachowana wartosc")
+def _():
+    odp = zadanie("/kpi?rok=1900")
+    html = tresc(odp)
+    zgodne = odp.status_code == 200 and "Zakres 2020-2030" in html and 'value="1900"' in html
+    return zgodne, odp.status_code
+
+
+@sprawdzenie(1, "Panel z cwiczen 4 zachowany: tytul, nawigacja, kafelki")
+def _():
+    status, html = 0, ""
+    odp = zadanie("/kpi?region=PL"); status, html = odp.status_code, tresc(odp)
+    tytul = re.search(r"<title>([^<]*)</title>", html)
+    zgodne = (status == 200 and bool(tytul) and tytul.group(1).strip() == "Wskaźniki: PL · TADS"
+              and html.count('class="kafelek"') == 4 and 'href="/regiony/DE"' in html)
+    return zgodne, tytul.group(1).strip() if tytul else status
+
+
+@sprawdzenie(1, "Komunikat flash jest jednokrotny; filtr bez tokenu")
+def _():
+    pierwszy = tresc(zadanie("/kpi?region=XX"))
+    po = tresc(zadanie("/kpi"))
+    zgodne = "Kryteria zawężenia" in pierwszy and "Kryteria zawężenia" not in po and "csrf_token" not in po
+    return zgodne, "wyswietlony raz, potem zuzyty" if zgodne else "komunikat nie wyswietlony raz albo powtorzony"
 
 
 # ------------------------------------------------------------------ zadanie 2
 
-@sprawdzenie(2, "Filtry wlasne zarejestrowane: zl, procent, liczba, data_pl")
+@sprawdzenie(2, "CSRFProtect zarejestrowany w aplikacji")
 def _():
-    nazwy = ("zl", "procent", "liczba", "data_pl")
     wymagana_aplikacja()
-    brakujace = [n for n in nazwy if n not in STAN["aplikacja"].jinja_env.filters]
-    return not brakujace, "komplet" if not brakujace else "brak: " + ", ".join(brakujace)
+    zarejestrowany = "csrf" in STAN["aplikacja"].extensions
+    return zarejestrowany, "tak" if zarejestrowany else "brak CSRFProtect"
 
 
-@sprawdzenie(2, "Filtr liczba: 1234567.5 z jednym miejscem → 1 234 567,5")
+@sprawdzenie(2, "services: zapisz_raport z uwagami i wykaz_raportow")
 def _():
-    wynik = filtr_wlasny("liczba")(1234567.5, 1)
-    return wynik == f"1{TWARDA}234{TWARDA}567,5", repr(wynik)
+    wymagana_aplikacja()
+    uslugi = importlib.import_module("app.services")
+    uslugi.zapisz_raport(2029, "CZ", "uwaga")
+    wykaz = [r for r in uslugi.wykaz_raportow() if r["rok"] == 2029]
+    return bool(wykaz) and wykaz[0].get("uwagi") == "uwaga", wykaz
 
 
-@sprawdzenie(2, "Filtr zl: 37900 → 37 900,00 zl (twarde spacje)")
+@sprawdzenie(2, "RaportForm: pola i walidator wlasny validate_rok")
 def _():
-    wynik = filtr_wlasny("zl")(37900)
-    return wynik == f"37{TWARDA}900,00{TWARDA}zł", repr(wynik)
+    f = formularz("RaportForm")
+    pola = [n for n in ("rok", "region", "szczegoly", "uwagi", "zapisz") if n in f._fields]
+    forms = importlib.import_module("app.forms")
+    zgodne = len(pola) == 5 and hasattr(forms.RaportForm, "validate_rok")
+    return zgodne, pola
 
 
-@sprawdzenie(2, "Filtr procent: 0.2639 → 26,4% oraz 26,39% dla dwoch miejsc")
+@sprawdzenie(2, "GET /raporty/nowy: 200, pola formularza i token CSRF")
 def _():
-    f = filtr_wlasny("procent")
-    wynik = (f(0.2639), f(0.2639, 2))
-    return wynik == ("26,4%", "26,39%"), wynik
+    odp = zadanie("/raporty/nowy")
+    html = tresc(odp)
+    brakujace = [n for n in ("csrf_token", "rok", "region", "szczegoly", "uwagi") if f'name="{n}"' not in html]
+    return odp.status_code == 200 and not brakujace, odp.status_code if not brakujace else "brak pol: " + ", ".join(brakujace)
 
 
-@sprawdzenie(2, "Filtr data_pl: obiekt date i tekst RRRR-MM-DD → 08.01.2026")
+@sprawdzenie(2, "Poprawny zapis: 303 i Location /raporty/2027")
 def _():
-    f = filtr_wlasny("data_pl")
-    wynik = (f(date(2026, 1, 8)), f("2026-01-08"))
-    return wynik == ("08.01.2026", "08.01.2026"), wynik
+    if not token("/raporty/nowy"):
+        raise Brak("brak tokenu CSRF w formularzu")
+    odp = wyslij("/raporty/nowy", {"rok": "2027", "region": "PL", "uwagi": "Test"})
+    return (odp.status_code, lokalizacja(odp)) == (303, "/raporty/2027"), (odp.status_code, lokalizacja(odp))
 
 
-@sprawdzenie(2, "Kafelek Przychod dla PL: 37 900,00 zl")
+@sprawdzenie(2, "Po zapisie: komunikat flash i liczba raportow")
 def _():
-    html = panel("/kpi?region=PL")[1]
-    zgodne = f"<b>37{TWARDA}900,00{TWARDA}zł</b>" in html.replace("\n", "").replace("  ", "")
-    return zgodne, "kafelek z filtrem zl" if zgodne else "brak sformatowanej kwoty"
+    html = tresc(zadanie("/raporty/2027"))
+    zgodne = "Raport za rok 2027 zapisany" in html and "Zapisane raporty: 1" in html
+    return zgodne, "komunikat i licznik" if zgodne else "brak komunikatu lub licznika"
 
 
-@sprawdzenie(2, "Marza PL: 26,4% w kafelku i w tabeli")
+@sprawdzenie(2, "Powtorzony raport: 422 i walidator wlasny")
 def _():
-    liczba = panel("/kpi?region=PL")[1].count("26,4%")
-    return liczba >= 2, liczba
+    odp = wyslij("/raporty/nowy", {"rok": "2027", "region": "PL"})
+    zgodne = odp.status_code == 422 and "Raport za ten rok i region już istnieje" in tresc(odp)
+    return zgodne, odp.status_code
 
 
-@sprawdzenie(2, "Procesor kontekstu: nawigacja z regionami CZ, DE, PL")
+@sprawdzenie(2, "Rok 1900: 422, komunikat zakresu i zachowana wartosc")
 def _():
-    html = panel("/kpi")[1]
-    brakujace = [k for k in ("CZ", "DE", "PL") if f'href="/regiony/{k}"' not in html]
-    return not brakujace, "komplet" if not brakujace else "brak: " + ", ".join(brakujace)
+    odp = wyslij("/raporty/nowy", {"rok": "1900", "region": "PL"})
+    html = tresc(odp)
+    zgodne = odp.status_code == 422 and "Zakres 2020-2030" in html and 'value="1900"' in html
+    return zgodne, odp.status_code
 
 
-@sprawdzenie(2, "Procesor kontekstu: stopka z biezacym rokiem")
+@sprawdzenie(2, "Brak roku i nieznany region: 422 z komunikatami po polsku")
 def _():
-    html = panel("/kpi")[1]
-    stopka = re.search(r"<footer>(.*?)</footer>", html, re.S)
-    rok = str(date.today().year)
-    zgodne = bool(stopka) and rok in stopka.group(1)
-    return zgodne, rok if zgodne else "brak roku w stopce"
+    brak = wyslij("/raporty/nowy", {"rok": "", "region": "PL"})
+    region = wyslij("/raporty/nowy", {"rok": "2028", "region": "XX"})
+    zgodne = (
+        brak.status_code == 422 and "Pole jest wymagane" in tresc(brak)
+        and region.status_code == 422 and "Nieprawidłowy wybór" in tresc(region)
+    )
+    return zgodne, (brak.status_code, region.status_code)
 
 
-@sprawdzenie(2, "Aktywny region wyrozniony w nawigacji")
+@sprawdzenie(2, "Uwagi dluzsze niz 200 znakow: 422")
 def _():
-    def aktywne(adres):
-        html = panel(adres)[1]
-        return re.findall(r'<a[^>]*class="aktywna"[^>]*>\s*(\w+)\s*</a>', html)
-    wynik = (aktywne("/regiony/DE"), aktywne("/kpi?region=PL"))
-    return wynik == (["DE"], ["PL"]), wynik
+    odp = wyslij("/raporty/nowy", {"rok": "2028", "region": "PL", "uwagi": "x" * 250})
+    zgodne = odp.status_code == 422 and "Najwyżej 200 znaków" in tresc(odp)
+    return zgodne, odp.status_code
 
 
-@sprawdzenie(2, "Data w panelu w formacie DD.MM.RRRR (Stan na dzien)")
+@sprawdzenie(2, "Zapis bez tokenu CSRF: 400")
 def _():
-    html = panel("/kpi")[1]
-    dopasowanie = re.search(r"Stan na dzień (\d{2}\.\d{2}\.\d{4})", html)
-    zgodne = bool(dopasowanie) and dopasowanie.group(1) == date.today().strftime("%d.%m.%Y")
-    return zgodne, dopasowanie.group(1) if dopasowanie else "brak daty"
+    odp = wyslij("/raporty/nowy", {"rok": "2028", "region": "PL"}, z_tokenem=False)
+    return odp.status_code == 400, odp.status_code
 
 
-@sprawdzenie(2, "Filtry wbudowane: Regiony w zbiorze: 3 (CZ, DE, PL)")
+@sprawdzenie(2, "Pola formularza renderowane makrem pole")
 def _():
-    html = panel("/kpi")[1]
-    zgodne = "Regiony w zbiorze: 3 (CZ, DE, PL)" in html
-    return zgodne, "tak" if zgodne else "brak wiersza z liczba regionow"
+    html = tresc(wyslij("/raporty/nowy", {"rok": "1900", "region": "PL"}))
+    zgodne = 'class="pole blad"' in html and 'class="komunikat-pola"' in html
+    return zgodne, "div.pole.blad i komunikat-pola" if zgodne else "brak struktury makra"
 
 
 # ------------------------------------------------------------------ zadanie 3
 
-def zapisz(rok, region):
-    odp = zadanie("/raporty/nowy", "POST", data={"rok": str(rok), "region": region})
-    return odp
-
-
-@sprawdzenie(3, "Zapis raportu: 303 i komunikat flash na stronie raportu")
+@sprawdzenie(3, "ZbiorForm z polem plik typu FileField")
 def _():
-    odp = zapisz(2027, "PL")
-    lokalizacja = (odp.headers.get("Location") or "").replace("http://localhost", "")
-    html = tresc(zadanie("/raporty/2027"))
-    komunikat = '<p class="komunikat sukces">Raport za rok 2027 został zapisany</p>'
-    zgodne = (odp.status_code, lokalizacja) == (303, "/raporty/2027") and komunikat in html
-    return zgodne, (odp.status_code, "komunikat" if komunikat in html else "brak komunikatu")
+    f = formularz("ZbiorForm")
+    from flask_wtf.file import FileField
+
+    zgodne = "plik" in f._fields and isinstance(f.plik, FileField)
+    return zgodne, type(f._fields.get("plik")).__name__
 
 
-@sprawdzenie(3, "Komunikat flash widoczny raz, potem zuzyty")
+@sprawdzenie(3, "GET /wczytaj: 200, multipart/form-data i token CSRF")
 def _():
-    zapisz(2028, "DE")
-    pierwszy = tresc(zadanie("/raporty/2028"))
-    drugi = tresc(zadanie("/raporty/2028"))
-    zgodne = "został zapisany" in pierwszy and "został zapisany" not in drugi
-    return zgodne, "raz" if zgodne else "komunikat nie wyswietlony raz"
-
-
-@sprawdzenie(3, "Strona raportu z szablonu: tytul i licznik zapisanych raportow")
-def _():
-    html = tresc(zadanie("/raporty/2027"))
-    tytul = re.search(r"<title>([^<]*)</title>", html)
-    zgodne = bool(tytul) and tytul.group(1).strip() == "Raport 2027 · TADS" and "Zapisane raporty: 1" in html
-    return zgodne, tytul.group(1).strip() if tytul else "brak <title>"
-
-
-@sprawdzenie(3, "Blad 404 dla przegladarki: strona z szablonu")
-def _():
-    odp = zadanie("/kpi?region=XX")
+    odp = zadanie("/wczytaj")
     html = tresc(odp)
-    tytul = re.search(r"<title>([^<]*)</title>", html)
-    zgodne = (
-        odp.status_code == 404 and bool(tytul) and tytul.group(1).strip() == "Błąd 404 · TADS"
-        and "<h1>404</h1>" in html and "<p>Nieznany region: XX</p>" in html
-    )
+    zgodne = odp.status_code == 200 and "multipart/form-data" in html and 'name="csrf_token"' in html and 'name="plik"' in html
     return zgodne, odp.status_code
 
 
-@sprawdzenie(3, "Strona bledu zachowuje nawigacje i stopke")
+@sprawdzenie(3, "Poprawny CSV: 303 i komunikat flash z liczba zamowien")
 def _():
-    html = tresc(zadanie("/kpi?region=XX"))
-    zgodne = "<nav>" in html and "<footer>" in html and "<h1>404</h1>" in html
-    return zgodne, "nav i footer" if zgodne else "brak ukladu wspolnego"
+    odp = plik("/wczytaj", "zbior.csv", CSV_POPRAWNY)
+    html = tresc(zadanie("/wczytaj"))
+    zgodne = odp.status_code == 303 and "Wczytano 2 zamówień z pliku zbior.csv" in html
+    return zgodne, (odp.status_code, "komunikat" if "Wczytano 2" in html else "brak komunikatu")
 
 
-@sprawdzenie(3, "Blad 404 w /api: dokument JSON obok strony HTML")
+@sprawdzenie(3, "Nazwa w komunikacie przechodzi przez secure_filename")
 def _():
-    html = tresc(zadanie("/kpi?region=XX"))
-    odp = zadanie("/api/kpi?region=XX")
-    dane = odp.get_json(silent=True) or {}
-    zgodne = (
-        "<h1>404</h1>" in html and "<p>Nieznany region: XX</p>" in html
-        and odp.status_code == 404 and dane.get("kod") == 404 and bool(dane.get("blad"))
-    )
-    return zgodne, f"{odp.status_code} {odp.mimetype}"
+    plik("/wczytaj", "raport roczny (1).csv", CSV_POPRAWNY)
+    html = tresc(zadanie("/wczytaj"))
+    zgodne = "z pliku raport_roczny_1.csv" in html
+    return zgodne, "raport_roczny_1.csv" if zgodne else "nazwa bez przetworzenia"
 
 
-@sprawdzenie(3, "Escapowanie: region=<script> daje encje, bez znacznika")
+@sprawdzenie(3, "Brak pliku: 422 i komunikat FileRequired")
 def _():
-    odp = zadanie("/kpi?region=%3Cscript%3E")
-    html = tresc(odp)
-    zgodne = odp.status_code == 404 and "&lt;script&gt;" in html and "<script>" not in html
+    odp = plik("/wczytaj", None, b"")
+    zgodne = odp.status_code == 422 and "Wskaż plik do wczytania" in tresc(odp)
     return zgodne, odp.status_code
 
 
-@sprawdzenie(3, "Nieistniejacy adres: strona bledu z nawigacja, bez wyjatku")
+@sprawdzenie(3, "Plik .txt: 422 i komunikat FileAllowed")
 def _():
-    odp = zadanie("/nie-ma-takiego-adresu")
-    html = tresc(odp)
-    zgodne = odp.status_code == 404 and "<h1>404</h1>" in html and "<nav>" in html
+    odp = plik("/wczytaj", "zbior.txt", b"abc", "text/plain")
+    zgodne = odp.status_code == 422 and "Dopuszczalny jest wyłącznie format CSV" in tresc(odp)
     return zgodne, odp.status_code
+
+
+@sprawdzenie(3, "Bajty binarne w pliku .csv: 422 i niepoprawna zawartosc")
+def _():
+    odp = plik("/wczytaj", "zbior.csv", bytes([0xFF, 0xFE, 0x00, 0x80, 0x81]) * 4)
+    zgodne = odp.status_code == 422 and "Niepoprawna zawartość" in tresc(odp)
+    return zgodne, odp.status_code
+
+
+@sprawdzenie(3, "Plik bez wymaganych kolumn: 422 i wykaz brakujacych")
+def _():
+    odp = plik("/wczytaj", "zbior.csv", b"a,b\n1,2\n")
+    html = tresc(odp)
+    zgodne = odp.status_code == 422 and "brak kolumn" in html and "przychod" in html
+    return zgodne, odp.status_code
+
+
+@sprawdzenie(3, "Limit MAX_CONTENT_LENGTH: 1 MiB w konfiguracji")
+def _():
+    wymagana_aplikacja()
+    limit = STAN["aplikacja"].config.get("MAX_CONTENT_LENGTH")
+    return limit == 1024 * 1024, limit
+
+
+@sprawdzenie(3, "Plik ok. 2 MiB: odpowiedz 413")
+def _():
+    duzy = b"data,region,przychod,koszt\n" + b"2026-01-01,PL,1,1\n" * 120000
+    odp = plik("/wczytaj", "duzy.csv", duzy)
+    return odp.status_code == 413, odp.status_code
 
 
 # --------------------------------------------------------------------- raport
@@ -353,7 +415,7 @@ def main():
     if STAN["aplikacja"] is not None:
         STAN["klient"] = STAN["aplikacja"].test_client()
 
-    print("Weryfikacja cwiczen 4")
+    print("Weryfikacja cwiczen 5")
     print(f"Katalog: {KORZEN}")
     print(f"Uklad aplikacji: {STAN['uklad']}")
     razem = {}

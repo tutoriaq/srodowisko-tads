@@ -20,16 +20,27 @@ def dostepne_regiony(sciezka: str) -> list[str]:
     return sorted(list({z["region"] for z in zamowienia}))
 
 
-def policz_wskazniki(sciezka: str, region: str = None) -> dict:
+def policz_wskazniki(sciezka: str, region: str = None, rok: int = None) -> dict:
     zamowienia = wczytaj_zamowienia(sciezka)
 
-    # Jeśli region nie został podany, domyślnie wybieramy "PL"
-    region_kod = region if region else "PL"
-    zamowienia = [z for z in zamowienia if z["region"] == region_kod]
+    # Filtrowanie po roku i regionie przed obliczeniami
+    if rok:
+        zamowienia = [z for z in zamowienia if str(z["data"]).startswith(str(rok))]
+    if region:
+        zamowienia = [z for z in zamowienia if z["region"] == region]
 
     liczba_zamowien = len(zamowienia)
     przychod = sum(z["przychod"] for z in zamowienia)
     koszt = sum(z["koszt"] for z in zamowienia)
+
+    if not zamowienia:
+        return {
+            "region": region if region else "wszystkie",
+            "liczba_zamowien": 0,
+            "przychod": 0.0,
+            "koszt": 0.0,
+            "marza": 0.0,
+        }
 
     if przychod == 0:
         marza = 0.0
@@ -37,7 +48,7 @@ def policz_wskazniki(sciezka: str, region: str = None) -> dict:
         marza = round((przychod - koszt) / przychod, 4)
 
     return {
-        "region": region_kod,
+        "region": region if region else "wszystkie",
         "liczba_zamowien": liczba_zamowien,
         "przychod": float(przychod),
         "koszt": float(koszt),
@@ -48,8 +59,12 @@ def policz_wskazniki(sciezka: str, region: str = None) -> dict:
 lista_RAPORTY = []
 
 
-def zapisz_raport(rok: int, region: str):
-    lista_RAPORTY.append({"rok": rok, "region": region})
+def zapisz_raport(rok: int, region: str, uwagi: str = ""):
+    lista_RAPORTY.append({"rok": rok, "region": region, "uwagi": uwagi})
+
+
+def wykaz_raportow() -> list:
+    return lista_RAPORTY
 
 
 def raporty_roku(rok: int) -> list:

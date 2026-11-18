@@ -1,0 +1,9 @@
+{# report.html #}
+{% extends "base.html" %}
+
+{% block tytul %}Raport {{ rok }}{% endblock %}
+
+{% block tresc %}
+<h1>Raport {{ rok }}</h1>
+<p>Zapisane raporty: {{ zapisane | length }}</p>
+{% endblock %}
